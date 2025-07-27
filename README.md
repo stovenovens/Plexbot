@@ -5,7 +5,7 @@ A comprehensive Telegram bot for managing and monitoring a Plex media server.
 ## Features
 
 - 🎥 **Now Playing** - View current streams across Plex and Jellyfin
-- 📊 **Statistics** - Weekly viewing stats and leaderboards
+- 📊 **Statistics** - Weekly viewing stats and leaderboards  
 - 📅 **Upcoming Releases** - TV episodes and movies from Sonarr/Radarr
 - 🔥 **Trending Content** - Hot movies and shows from TMDB
 - 🔌 **Server Control** - Wake-on-LAN and remote shutdown
@@ -19,14 +19,14 @@ A comprehensive Telegram bot for managing and monitoring a Plex media server.
 - `/upcoming` or `/up` - Show upcoming releases
 - `/hot` - Show trending content
 
-### Server Commands
+### Server Commands  
 - `/on` - Wake server with Wake-on-LAN
 - `/off` - Shutdown server (authorized users)
 - `/status` - Check server status
 
 ### Admin Commands
 - `/debug` - Show bot configuration
-- `/logs` - View recent logs (authorized users)
+- `/logs` - View recent logs (authorized users) 
 - `/testjellyfin` - Test Jellyfin API
 - `/info` - Show help and available commands
 
@@ -37,10 +37,6 @@ A comprehensive Telegram bot for managing and monitoring a Plex media server.
 3. Install dependencies: `pip install -r requirements.txt`
 4. Copy `.env.example` to `.env` and configure your settings
 5. Run the bot: `python main.py`
-
-## Configuration
-
-See `.env.example` for all available configuration options.
 
 ## License
 

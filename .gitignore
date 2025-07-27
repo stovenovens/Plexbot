@@ -33,5 +33,5 @@ Thumbs.db
 *.bak
 *.old
 
-# Service files (contain paths specific to your system)
+# Service files
 *.service

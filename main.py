@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 """
 Plex Bot - Main Entry Point
-Comprehensive Plex media server automation bot
+Comprehensive Plex media server automation bot with request system
 """
 
 import logging
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-from telegram.ext import ApplicationBuilder, CommandHandler
+from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandler
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 
@@ -18,6 +18,8 @@ from utils.server_status import scheduled_wake
 from commands.media_commands import nowplaying_command, upcoming_command, hot_command, stats_command
 from commands.server_commands import on_command, off_command, check_status_command
 from commands.admin_commands import debug_command, testjellyfin_command, logs_command, testwake_command, info_command, welcome_command
+from commands.request_commands import movie_command, series_command, tv_command
+from commands.request_callbacks import handle_request_callback
 
 # Setup logging first
 setup_logging()
@@ -84,6 +86,11 @@ def main():
     app.add_handler(CommandHandler("up", upcoming_command))  # Alias
     app.add_handler(CommandHandler("hot", hot_command))
     
+    # Request commands
+    app.add_handler(CommandHandler("movie", movie_command))
+    app.add_handler(CommandHandler("series", series_command))
+    app.add_handler(CommandHandler("tv", tv_command))  # Alias for series
+    
     # Admin commands
     app.add_handler(CommandHandler("debug", debug_command))
     app.add_handler(CommandHandler("testjellyfin", testjellyfin_command))
@@ -91,6 +98,9 @@ def main():
     app.add_handler(CommandHandler("testwake", testwake_command))
     app.add_handler(CommandHandler("info", info_command))
     app.add_handler(CommandHandler("welcome", welcome_command))
+    
+    # Callback query handler for request system
+    app.add_handler(CallbackQueryHandler(handle_request_callback))
 
     logger.info("🚀 Bot starting up...")
     app.run_polling()

@@ -1,6 +1,7 @@
 """
 Admin and debug commands
 Handles debug, logs, info, welcome, and test commands
+Updated to include request system information
 """
 
 import logging
@@ -14,7 +15,7 @@ from config import (
     OFF_USER_IDS, MELBOURNE_TZ, GROUP_CHAT_ID, BOT_TOPIC_ID,
     WEEKDAY_WAKE_HOUR, WEEKDAY_WAKE_MINUTE, WEEKEND_WAKE_HOUR, WEEKEND_WAKE_MINUTE,
     PLEX_MAC, PLEX_BROADCAST_IP, TAUTILLI_URL, JELLYFIN_URL, SONARR_URL, RADARR_URL,
-    JELLYFIN_API_KEY
+    JELLYFIN_API_KEY, TMDB_BEARER_TOKEN
 )
 from utils.helpers import send_command_response, send_to_bot_topic, escape_md
 from utils.server_status import scheduled_wake
@@ -37,6 +38,12 @@ async def debug_command(update, context: CallbackContext):
         msg += f"\\- Jellyfin URL: {escape_md(JELLYFIN_URL[:50] + '...' if len(JELLYFIN_URL) > 50 else JELLYFIN_URL) if JELLYFIN_URL else 'Not configured'}\n"
         msg += f"\\- Sonarr URL: {escape_md(SONARR_URL[:50] + '...' if len(SONARR_URL) > 50 else SONARR_URL) if SONARR_URL else 'Not configured'}\n"
         msg += f"\\- Radarr URL: {escape_md(RADARR_URL[:50] + '...' if len(RADARR_URL) > 50 else RADARR_URL) if RADARR_URL else 'Not configured'}\n"
+        
+        # Request system status
+        msg += f"\n🎬 *Request System Status*\n"
+        msg += f"\\- TMDB API: {'✅ Configured' if TMDB_BEARER_TOKEN else '❌ Not configured'}\n"
+        msg += f"\\- Movie requests: {'✅ Available' if (RADARR_URL and TMDB_BEARER_TOKEN) else '❌ Unavailable'}\n"
+        msg += f"\\- TV requests: {'✅ Available' if (SONARR_URL and TMDB_BEARER_TOKEN) else '❌ Unavailable'}\n"
         
         # Add scheduler info - we'll import the scheduler from main
         try:
@@ -103,6 +110,76 @@ async def testjellyfin_command(update, context: CallbackContext):
         logger.error("❌ Jellyfin test failed: %s", e)
         await send_command_response(update, context, f"❌ Test failed: {escape_md(str(e))}", parse_mode=ParseMode.MARKDOWN_V2)
 
+async def testrequest_command(update, context: CallbackContext):
+    """Test request system APIs (TMDB, Sonarr, Radarr)"""
+    try:
+        await send_command_response(update, context, "🔍 Testing request system APIs\\.\\.\\.", parse_mode=ParseMode.MARKDOWN_V2)
+        
+        results = []
+        
+        # Test TMDB API
+        if TMDB_BEARER_TOKEN:
+            try:
+                headers = {"Authorization": f"Bearer {TMDB_BEARER_TOKEN}", "accept": "application/json"}
+                async with AsyncClient() as client:
+                    resp = await client.get("https://api.themoviedb.org/3/trending/movie/week", headers=headers)
+                    if resp.status_code == 200:
+                        results.append("✅ TMDB API: Working")
+                    else:
+                        results.append(f"❌ TMDB API: Failed ({resp.status_code})")
+            except Exception as e:
+                results.append(f"❌ TMDB API: Error ({str(e)[:30]}...)")
+        else:
+            results.append("❌ TMDB API: Not configured")
+        
+        # Test Radarr API
+        if RADARR_URL:
+            try:
+                from commands.request_commands import request_manager
+                folders, error = await request_manager.get_radarr_root_folders()
+                if error:
+                    results.append(f"❌ Radarr API: {error}")
+                else:
+                    results.append(f"✅ Radarr API: {len(folders)} root folders")
+            except Exception as e:
+                results.append(f"❌ Radarr API: Error ({str(e)[:30]}...)")
+        else:
+            results.append("❌ Radarr API: Not configured")
+        
+        # Test Sonarr API
+        if SONARR_URL:
+            try:
+                from commands.request_commands import request_manager
+                folders, error = await request_manager.get_sonarr_root_folders()
+                if error:
+                    results.append(f"❌ Sonarr API: {error}")
+                else:
+                    results.append(f"✅ Sonarr API: {len(folders)} root folders")
+            except Exception as e:
+                results.append(f"❌ Sonarr API: Error ({str(e)[:30]}...)")
+        else:
+            results.append("❌ Sonarr API: Not configured")
+        
+        # Format results
+        msg = "🧪 *Request System API Test Results*\n\n"
+        for result in results:
+            msg += f"{escape_md(result)}\n"
+        
+        # Add recommendations
+        working_apis = len([r for r in results if r.startswith("✅")])
+        if working_apis == 3:
+            msg += f"\n🎉 All APIs working\\! Request system fully functional\\."
+        elif working_apis >= 1:
+            msg += f"\n⚠️ {working_apis}/3 APIs working\\. Check configuration for failed APIs\\."
+        else:
+            msg += f"\n❌ No APIs working\\. Check all configurations\\."
+        
+        await send_command_response(update, context, msg, parse_mode=ParseMode.MARKDOWN_V2)
+        
+    except Exception as e:
+        logger.error("❌ Request system test failed: %s", e)
+        await send_command_response(update, context, f"❌ Test failed: {escape_md(str(e))}", parse_mode=ParseMode.MARKDOWN_V2)
+
 async def logs_command(update, context: CallbackContext):
     """Show recent log entries from current session"""
     user_id = update.effective_user.id
@@ -167,6 +244,11 @@ async def info_command(update, context: CallbackContext):
     """Show bot information and available commands"""
     try:
         msg = "🤖 *Plex Bot Information*\n\n"
+        
+        msg += "*Request Commands:*\n"
+        msg += "\\- `/movie <title>` \\- Search for movies to request\n"
+        msg += "\\- `/series <title>` or `/tv <title>` \\- Search for TV series\n\n"
+        
         msg += "*Server Commands:*\n"
         msg += "\\- `/on` \\- Wake server\n"
         msg += "\\- `/off` \\- Shutdown server \\(authorized users\\)\n"
@@ -181,9 +263,17 @@ async def info_command(update, context: CallbackContext):
         msg += "*Admin Commands:*\n"
         msg += "\\- `/debug` \\- Bot status info\n"
         msg += "\\- `/testjellyfin` \\- Test Jellyfin API\n"
+        msg += "\\- `/testrequest` \\- Test request system APIs\n"
         msg += "\\- `/testwake` \\- Test Wake\\-on\\-LAN\n"
         msg += "\\- `/logs` \\- Recent log entries\n"
         msg += "\\- `/info` \\- This help message\n\n"
+        
+        msg += "*Request System Features:*\n"
+        msg += "\\- No authentication required for group members\n"
+        msg += "\\- TMDB search with interactive navigation\n"
+        msg += "\\- Automatic Radarr/Sonarr integration\n"
+        msg += "\\- Smart detection of existing content\n"
+        msg += "\\- Support for multiple root folders/quality profiles\n\n"
         
         msg += "*Automated Features:*\n"
         msg += f"\\- Auto\\-wake weekdays: {WEEKDAY_WAKE_HOUR:02d}:{WEEKDAY_WAKE_MINUTE:02d}\n"
@@ -205,12 +295,18 @@ async def welcome_command(update, context: CallbackContext):
         msg = "👋 *Welcome to Plex Bot\\!*\n\n"
         msg += f"🕐 Current time: {escape_md(current_time)}\n\n"
         msg += "This bot manages your Plex server with automated wake\\-up, "
-        msg += "media tracking, and convenient remote control\\.\n\n"
+        msg += "media tracking, convenient remote control, and an integrated request system\\.\n\n"
         msg += "*Quick Start:*\n"
         msg += "\\- `/status` \\- Check if server is online\n"
         msg += "\\- `/on` \\- Wake server if needed\n"
         msg += "\\- `/np` \\- See what's currently playing\n"
+        msg += "\\- `/movie <title>` \\- Request a movie\n"
+        msg += "\\- `/series <title>` \\- Request a TV series\n"
         msg += "\\- `/info` \\- View all available commands\n\n"
+        msg += "*Request System:*\n"
+        msg += "Search and request movies/TV shows directly from TMDB\\. "
+        msg += "Content is automatically added to Radarr/Sonarr for download\\. "
+        msg += "No authentication required \\- works for all group members\\!\n\n"
         msg += "The server will automatically wake at scheduled times "
         msg += "\\(weekdays 4:30 PM, weekends 10:00 AM\\)\\.\n\n"
         msg += "Use `/debug` to check bot configuration and status\\."

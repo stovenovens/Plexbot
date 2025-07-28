@@ -62,7 +62,10 @@ async def send_command_response(update, context: CallbackContext, message: str, 
         logger.info("✅ Command response sent to bot topic (silent: %s)", silent)
         
         # If command was issued outside bot topic, send a redirect message
-        if update.message.message_thread_id != BOT_TOPIC_ID:
+        # Check if update.message exists and has message_thread_id
+        if (update.message and 
+            hasattr(update.message, 'message_thread_id') and 
+            update.message.message_thread_id != BOT_TOPIC_ID):
             redirect_msg = f"👀 Response sent to bot topic"
             await update.message.reply_text(redirect_msg, disable_notification=silent)
             logger.info("✅ Redirect message sent to original location (silent: %s)", silent)
@@ -71,8 +74,18 @@ async def send_command_response(update, context: CallbackContext, message: str, 
         logger.error("❌ Failed to send command response: %s", e)
         # Fallback: send to where command was issued
         try:
-            await update.message.reply_text(message, parse_mode=parse_mode, disable_notification=silent)
-            logger.info("✅ Command response sent as fallback to original location (silent: %s)", silent)
+            if update.message and hasattr(update.message, 'reply_text'):
+                await update.message.reply_text(message, parse_mode=parse_mode, disable_notification=silent)
+                logger.info("✅ Command response sent as fallback to original location (silent: %s)", silent)
+            else:
+                # Last resort: send to main group without topic
+                await context.bot.send_message(
+                    chat_id=GROUP_CHAT_ID,
+                    text=message,
+                    parse_mode=parse_mode,
+                    disable_notification=silent
+                )
+                logger.info("✅ Command response sent to main group as last resort (silent: %s)", silent)
         except Exception as fallback_error:
             logger.error("❌ Failed to send response even as fallback: %s", fallback_error)
 

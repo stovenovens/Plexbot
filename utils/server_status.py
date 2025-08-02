@@ -1,6 +1,7 @@
 """
 Server status checking and wake functionality
 Handles WOL, server status detection, and scheduled tasks
+Fixed to properly check Plex server IP instead of relying on external Tautulli
 """
 
 import logging
@@ -18,76 +19,47 @@ from utils.helpers import send_to_bot_topic
 logger = logging.getLogger(__name__)
 
 async def check_server_status():
-    """Check if the Plex server is already running by testing multiple endpoints"""
+    """Check if the Plex server is actually running by testing the actual server IP"""
     try:
-        # Try multiple methods to check server status
-        checks = []
-        
-        # Method 1: Try Tautulli (most reliable if configured)
-        if TAUTILLI_URL and TAUTILLI_API_KEY:
+        # Priority 1: Check the actual Plex server directly (most reliable)
+        if PLEX_SERVER_IP:
             try:
                 async with AsyncClient(timeout=5.0) as client:
-                    taut_url = TAUTILLI_URL.rstrip('/') + f"/api/v2?apikey={TAUTILLI_API_KEY}&cmd=get_activity"
-                    resp = await client.get(taut_url)
-                    if resp.status_code == 200:
-                        checks.append(("Tautulli", True))
-                        logger.debug("✅ Server check via Tautulli: Online")
-                    else:
-                        checks.append(("Tautulli", False))
-                        logger.debug("❌ Server check via Tautulli: Offline (status %d)", resp.status_code)
+                    # Try common Plex ports
+                    for port in [32400, 32401]:  # Try main port and alt port
+                        try:
+                            plex_url = f"http://{PLEX_SERVER_IP}:{port}/identity"
+                            resp = await client.get(plex_url)
+                            if resp.status_code == 200:
+                                logger.info("✅ Plex server online - Direct check successful on port %s", port)
+                                return True, f"Direct Plex check (port {port})"
+                        except Exception:
+                            continue  # Try next port
+                    
+                    # If direct Plex check fails, server is definitely offline
+                    logger.info("❌ Plex server offline - Direct check failed on all ports")
+                    return False, "Direct Plex check failed"
+                    
             except Exception as e:
-                checks.append(("Tautulli", False))
-                logger.debug("❌ Server check via Tautulli: Offline (%s)", str(e))
+                logger.debug("❌ Direct Plex check failed: %s", e)
+                # Continue to secondary checks
         
-        # Method 2: Try Jellyfin (if configured)
-        if JELLYFIN_URL and JELLYFIN_API_KEY:
+        # Priority 2: Check Jellyfin on the same server (if configured and on same IP)
+        if JELLYFIN_URL and JELLYFIN_API_KEY and PLEX_SERVER_IP in JELLYFIN_URL:
             try:
                 async with AsyncClient(timeout=5.0) as client:
                     jellyfin_url = JELLYFIN_URL.rstrip('/') + f"/Sessions?api_key={JELLYFIN_API_KEY}"
                     resp = await client.get(jellyfin_url)
                     if resp.status_code == 200:
-                        checks.append(("Jellyfin", True))
-                        logger.debug("✅ Server check via Jellyfin: Online")
-                    else:
-                        checks.append(("Jellyfin", False))
-                        logger.debug("❌ Server check via Jellyfin: Offline (status %d)", resp.status_code)
+                        logger.info("✅ Server online via Jellyfin check (same server)")
+                        return True, "Jellyfin check (same server)"
             except Exception as e:
-                checks.append(("Jellyfin", False))
-                logger.debug("❌ Server check via Jellyfin: Offline (%s)", str(e))
+                logger.debug("❌ Jellyfin check failed: %s", e)
         
-        # Method 3: Try direct Plex server ping (if we have the IP)
-        if PLEX_SERVER_IP:
-            try:
-                async with AsyncClient(timeout=3.0) as client:
-                    # Try common Plex port
-                    plex_url = f"http://{PLEX_SERVER_IP}:32400/identity"
-                    resp = await client.get(plex_url)
-                    if resp.status_code == 200:
-                        checks.append(("Plex Direct", True))
-                        logger.debug("✅ Server check via Plex Direct: Online")
-                    else:
-                        checks.append(("Plex Direct", False))
-                        logger.debug("❌ Server check via Plex Direct: Offline (status %d)", resp.status_code)
-            except Exception as e:
-                checks.append(("Plex Direct", False))
-                logger.debug("❌ Server check via Plex Direct: Offline (%s)", str(e))
+        # If we get here, all checks on the actual server failed
+        logger.info("❌ Server appears to be offline - all checks on %s failed", PLEX_SERVER_IP)
+        return False, f"All checks on {PLEX_SERVER_IP} failed"
         
-        # Evaluate results
-        if not checks:
-            logger.warning("⚠️ No server check methods available - proceeding with wake")
-            return False, "No check methods configured"
-        
-        # Server is considered online if ANY method succeeds
-        online_checks = [check for check in checks if check[1]]
-        if online_checks:
-            online_methods = [check[0] for check in online_checks]
-            logger.info("✅ Server is already online (verified via: %s)", ", ".join(online_methods))
-            return True, f"Online via {', '.join(online_methods)}"
-        else:
-            offline_methods = [check[0] for check in checks]
-            logger.info("❌ Server appears to be offline (checked: %s)", ", ".join(offline_methods))
-            return False, f"Offline - checked {', '.join(offline_methods)}"
-            
     except Exception as e:
         logger.error("❌ Error checking server status: %s", e)
         return False, f"Check failed: {str(e)}"
@@ -102,23 +74,25 @@ async def scheduled_wake(bot: Bot):
                 PLEX_MAC, PLEX_BROADCAST_IP, BOT_TOPIC_ID)
     
     try:
-        # Check if server is already running
-        logger.info("🔍 Checking if server is already online...")
+        # Check if server is actually running
+        logger.info("🔍 Checking if Plex server (%s) is actually online...", PLEX_SERVER_IP)
         is_online, status_message = await check_server_status()
         
         if is_online:
             # Server is already running - skip wake command and notification
-            logger.info("✅ Server already online - skipping wake command and notification")
+            logger.info("✅ Plex server already online - skipping wake command and notification")
+            logger.info("✅ Status: %s", status_message)
             return
         
         # Server is offline - proceed with wake
-        logger.info("📤 Server offline - sending WOL packet...")
+        logger.info("📤 Plex server offline - sending WOL packet...")
+        logger.info("📤 Status: %s", status_message)
         send_magic_packet(PLEX_MAC, ip_address=PLEX_BROADCAST_IP)
         logger.info("✅ WOL packet sent successfully to %s via %s", PLEX_MAC, PLEX_BROADCAST_IP)
         
         # Send Telegram notification to bot topic
         logger.info("📱 Sending Telegram notification to bot topic %s...", BOT_TOPIC_ID)
-        message_text = f"🔌 Plex server auto-start at {melbourne_time.strftime('%H:%M')} ({status_message})"
+        message_text = f"🔌 Plex server auto-start at {melbourne_time.strftime('%H:%M')} (Server was offline)"
         await send_to_bot_topic(bot, message_text)
         
     except Exception as e:

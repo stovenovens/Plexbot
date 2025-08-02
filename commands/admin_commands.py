@@ -45,23 +45,67 @@ async def debug_command(update, context: CallbackContext):
         msg += f"\\- Movie requests: {'✅ Available' if (RADARR_URL and TMDB_BEARER_TOKEN) else '❌ Unavailable'}\n"
         msg += f"\\- TV requests: {'✅ Available' if (SONARR_URL and TMDB_BEARER_TOKEN) else '❌ Unavailable'}\n"
         
-        # Add scheduler info - we'll import the scheduler from main
+        # Enhanced scheduler detection - check if the application has a scheduler
+        msg += f"\n📅 *Scheduler Status*\n"
+        
         try:
-            from main import scheduler
-            if scheduler:
-                msg += f"\n📅 *Scheduler Status*\n"
-                msg += f"\\- Active jobs: {len(scheduler.get_jobs())}\n"
-                for job in scheduler.get_jobs():
-                    if job.next_run_time:
-                        next_run = job.next_run_time.astimezone(MELBOURNE_TZ).strftime('%Y-%m-%d %H:%M:%S %Z')
-                        msg += f"\\- {escape_md(job.id)}: {escape_md(next_run)}\n"
-                        msg += f"  \\(30min grace period\\)\n"
+            # Try to access the application's job queue to detect scheduler
+            # This is a more reliable way to check if scheduler is running
+            scheduler_found = False
+            app = context.application
+            
+            # Check if the application has any running jobs (indicates scheduler is active)
+            if hasattr(app, 'job_queue') and app.job_queue:
+                msg += f"\\- Job queue: Active\n"
+                scheduler_found = True
+            
+            # Alternative method: check if we can find scheduler in sys.modules
+            import sys
+            if 'main' in sys.modules:
+                main_module = sys.modules['main']
+                if hasattr(main_module, 'scheduler') and main_module.scheduler:
+                    scheduler = main_module.scheduler
+                    if scheduler.running:
+                        jobs = scheduler.get_jobs()
+                        msg += f"\\- Active jobs: {len(jobs)}\n"
+                        
+                        for job in jobs:
+                            if job.next_run_time:
+                                next_run = job.next_run_time.astimezone(MELBOURNE_TZ).strftime('%Y-%m-%d %H:%M:%S %Z')
+                                msg += f"\\- {escape_md(job.id)}: {escape_md(next_run)}\n"
+                                msg += f"  \\(30min grace period\\)\n"
+                            else:
+                                msg += f"\\- {escape_md(job.id)}: Never\n"
+                        scheduler_found = True
                     else:
-                        msg += f"\\- {escape_md(job.id)}: Never\n"
-            else:
-                msg += f"\n📅 *Scheduler Status*\n\\- Scheduler not initialized"
-        except ImportError:
-            msg += f"\n📅 *Scheduler Status*\n\\- Could not access scheduler info"
+                        msg += f"\\- Scheduler created but not running\n"
+                else:
+                    msg += f"\\- Scheduler object not found in main module\n"
+            
+            # If we couldn't detect the scheduler through normal means, 
+            # check for recent auto-wake activity in logs as evidence
+            if not scheduler_found:
+                try:
+                    # Check if we can find recent scheduler activity in logs
+                    # This is indirect but indicates the scheduler was working recently
+                    import subprocess
+                    result = subprocess.run(
+                        ['journalctl', '-u', 'plexbot', '--since', '24 hours ago', '--grep', 'Auto-wake job triggered'],
+                        capture_output=True, text=True, timeout=5
+                    )
+                    if result.returncode == 0 and result.stdout.strip():
+                        msg += f"\\- Recent auto\\-wake activity detected in logs\n"
+                        msg += f"\\- Scheduler appears to be working \\(indirect detection\\)\n"
+                    else:
+                        msg += f"\\- No recent scheduler activity detected\n"
+                        msg += f"\\- Scheduler status uncertain\n"
+                except Exception:
+                    msg += f"\\- Scheduler status: Unable to detect\n"
+                    msg += f"\\- \\(Import/detection limitations\\)\n"
+            
+        except Exception as e:
+            msg += f"\\- Scheduler detection failed: {escape_md(str(e))}\n"
+            msg += f"\\- Note: Scheduler may be working despite detection issues\n"
             
         await send_command_response(update, context, msg, parse_mode=ParseMode.MARKDOWN_V2)
     except Exception as e:

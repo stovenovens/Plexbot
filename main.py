@@ -41,7 +41,7 @@ async def on_startup(app):
     # Add auto-wake jobs with misfire grace period
     scheduler.add_job(
         scheduled_wake,
-        CronTrigger(day_of_week='mon,tue,wed,thu,fri', hour=WEEKDAY_WAKE_HOUR, minute=WEEKDAY_WAKE_MINUTE),
+        CronTrigger(day_of_week='mon,tue,wed,thu,fri', hour=WEEKDAY_WAKE_HOUR, minute=WEEKDAY_WAKE_MINUTE, timezone=MELBOURNE_TZ),
         args=[app.bot],
         id='auto_on_weekday',
         misfire_grace_time=1800,  # 30 minutes grace period
@@ -49,7 +49,7 @@ async def on_startup(app):
     )
     scheduler.add_job(
         scheduled_wake,
-        CronTrigger(day_of_week='sat,sun', hour=WEEKEND_WAKE_HOUR, minute=WEEKEND_WAKE_MINUTE),
+        CronTrigger(day_of_week='sat,sun', hour=WEEKEND_WAKE_HOUR, minute=WEEKEND_WAKE_MINUTE, timezone=MELBOURNE_TZ),
         args=[app.bot],
         id='auto_on_weekend',
         misfire_grace_time=1800,  # 30 minutes grace period
@@ -60,7 +60,7 @@ async def on_startup(app):
     if AUTO_SHUTDOWN_ENABLED:
         scheduler.add_job(
             scheduled_shutdown,
-            CronTrigger(hour=AUTO_SHUTDOWN_HOUR, minute=AUTO_SHUTDOWN_MINUTE),
+            CronTrigger(hour=AUTO_SHUTDOWN_HOUR, minute=AUTO_SHUTDOWN_MINUTE, timezone=MELBOURNE_TZ),
             args=[app.bot, app],
             id='auto_shutdown',
             misfire_grace_time=1800,  # 30 minutes grace period

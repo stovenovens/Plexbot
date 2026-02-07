@@ -2,9 +2,11 @@
 
 A comprehensive Telegram bot for managing and monitoring a Plex media server with integrated request system.
 
+[![Buy Me A Coffee](https://img.shields.io/badge/Buy%20Me%20A%20Coffee-donate-yellow?style=flat-square&logo=buy-me-a-coffee)](https://buymeacoffee.com/Stovenovens)
+
 ## Features
 
-- 🎥 **Now Playing** - View current streams across Plex and Jellyfin
+- 🎥 **Now Playing** - View current streams on Plex
 - 📊 **Statistics** - Weekly viewing stats and leaderboards  
 - 📅 **Upcoming Releases** - TV episodes and movies from Sonarr/Radarr
 - 🔥 **Trending Content** - Hot movies and shows from TMDB
@@ -14,9 +16,12 @@ A comprehensive Telegram bot for managing and monitoring a Plex media server wit
 
 ## Commands
 
+**Note:** All commands must be sent in the bot topic (ID 15980). Commands sent in other topics will be silently ignored.
+
 ### Request Commands
 - `/movie <title>` - Search for movies to request
 - `/series <title>` or `/tv <title>` - Search for TV series to request
+- `/myrequests` or `/requests` - View your request history and status
 
 ### Media Commands
 - `/nowplaying` or `/np` - Show current streams
@@ -31,8 +36,7 @@ A comprehensive Telegram bot for managing and monitoring a Plex media server wit
 
 ### Admin Commands
 - `/debug` - Show bot configuration
-- `/logs` - View recent logs (authorized users) 
-- `/testjellyfin` - Test Jellyfin API
+- `/logs` - View recent logs (authorized users)
 - `/testwake` - Test Wake-on-LAN
 - `/info` - Show help and available commands
 
@@ -46,6 +50,8 @@ The bot includes a Searcharr-like request system that allows anyone in the group
 - **Flexible Configuration** - Supports multiple root folders and quality profiles
 - **One-Click Adding** - Add content directly to Radarr/Sonarr with minimal clicks
 - **External Links** - Quick access to TMDB and IMDb pages
+- **Request Tracking** - Automatic notifications when your requested content is available
+- **Status Monitoring** - Check status of all your requests with `/myrequests`
 
 ### Request Workflow
 
@@ -55,6 +61,8 @@ The bot includes a Searcharr-like request system that allows anyone in the group
 4. Click "Add Movie/Series" to add to Radarr/Sonarr
 5. Select root folder and quality profile (if multiple configured)
 6. Content is automatically added and searched for
+7. Bot tracks download progress and notifies you when available (every 15 minutes)
+8. View all your requests with `/myrequests`
 
 ## Setup
 
@@ -77,18 +85,29 @@ The bot includes a Searcharr-like request system that allows anyone in the group
 - `SONARR_URL` and `SONARR_API_KEY` - For TV series requests
 
 ### Optional Features
-- `JELLYFIN_URL` and `JELLYFIN_API_KEY` - For Jellyfin monitoring
 - `PLEX_SERVER_MAC` and `PLEX_BROADCAST_IP` - For Wake-on-LAN
 - `PLEX_SERVER_IP`, `PLEX_SSH_USER`, `PLEX_SSH_PASSWORD` - For remote shutdown
+- `AUTO_SHUTDOWN_ENABLED`, `AUTO_SHUTDOWN_HOUR`, `AUTO_SHUTDOWN_MINUTE` - For automatic shutdown
+- `AUTO_SHUTDOWN_RECHECK_MINUTES` - Minutes to wait before rechecking for active streams
 
 See `.env.example` for all available configuration options.
 
 ## Automated Features
 
+### Auto-Wake
 - **Auto-wake weekdays:** 4:30 PM (configurable)
 - **Auto-wake weekends:** 10:00 AM (configurable)
 - **Smart server detection** - Skips wake if already online
 - **30-minute grace period** - For missed schedules
+
+### Auto-Shutdown (Optional)
+- **Smart shutdown at 1:00 AM** (configurable, disabled by default)
+- **Active stream detection** - Checks Tautulli for active viewers
+- **Delayed shutdown** - If streams are active, rechecks every 30 minutes
+- **Automatic retry** - Continues checking until no active streams
+- **Notifications** - Telegram alerts for all shutdown events
+
+### Other
 - **Silent notifications** - Configurable notification sounds
 
 ## Request System vs Searcharr
@@ -134,7 +153,6 @@ The request system is designed for trusted group environments:
 - **Tautulli API** - For Plex monitoring and statistics
 - **Radarr API v1/v2/v3** - For movie management (auto-detected)
 - **Sonarr API v1/v2/v3** - For TV series management (auto-detected)
-- **Jellyfin API** - Optional, for additional monitoring
 
 ## File Structure
 
@@ -161,15 +179,23 @@ plex_bot/
 
 ## Contributing
 
-This is a private project, but you can:
+Contributions are welcome! Feel free to:
 
-1. Fork the repository for your own modifications
-2. Submit issues for bugs or feature requests
-3. Adapt the request system for your own bots
+1. Fork the repository
+2. Create a feature branch
+3. Submit a pull request
+
+Bug reports and feature requests are also appreciated via [Issues](https://github.com/stovenovens/Plexbot/issues).
+
+## Support
+
+If you find this bot useful, consider supporting development:
+
+[![Buy Me A Coffee](https://img.shields.io/badge/Buy%20Me%20A%20Coffee-donate-yellow?style=flat-square&logo=buy-me-a-coffee)](https://buymeacoffee.com/Stovenovens)
 
 ## License
 
-Private project - not for redistribution.
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
 ## Changelog
 
@@ -182,7 +208,7 @@ Private project - not for redistribution.
 - Group chat optimized workflow
 
 ### v1.0 - Initial Release
-- Plex and Jellyfin monitoring
+- Plex monitoring via Tautulli
 - Automated wake-on-LAN scheduling
 - Statistics and trending content
 - Server control and admin functions

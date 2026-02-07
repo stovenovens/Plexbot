@@ -58,7 +58,7 @@ A comprehensive Telegram bot for managing and monitoring a Plex media server.
 
 ## Features
 
-- 🎥 **Now Playing** - View current streams across Plex and Jellyfin
+- 🎥 **Now Playing** - View current streams on Plex
 - 📊 **Statistics** - Weekly viewing stats and leaderboards
 - 📅 **Upcoming Releases** - TV episodes and movies from Sonarr/Radarr
 - 🔥 **Trending Content** - Hot movies and shows from TMDB
@@ -81,7 +81,6 @@ A comprehensive Telegram bot for managing and monitoring a Plex media server.
 ### Admin Commands
 - `/debug` - Show bot configuration
 - `/logs` - View recent logs (authorized users)
-- `/testjellyfin` - Test Jellyfin API
 - `/info` - Show help and available commands
 
 ## Setup
@@ -111,10 +110,6 @@ BOT_TOPIC_ID=15980
 # === PLEX/TAUTULLI SETTINGS ===
 TAUTILLI_URL=http://192.168.1.30:8181
 TAUTILLI_API_KEY=your_tautulli_api_key
-
-# === JELLYFIN SETTINGS (Optional) ===
-JELLYFIN_URL=http://192.168.1.30:8096
-JELLYFIN_API_KEY=your_jellyfin_api_key
 
 # === WAKE-ON-LAN SETTINGS ===
 PLEX_SERVER_MAC=your:mac:address:here
@@ -152,7 +147,7 @@ git add .
 git commit -m "Initial commit - Plex Telegram Bot
 
 - Complete bot functionality with modular structure
-- Plex and Jellyfin integration
+- Plex monitoring via Tautulli
 - Sonarr/Radarr upcoming releases
 - TMDB trending content
 - Scheduled wake-on-LAN

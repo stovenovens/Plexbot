@@ -13,7 +13,8 @@ from httpx import AsyncClient
 
 from config import (
     TMDB_BEARER_TOKEN, SONARR_URL, SONARR_API_KEY, RADARR_URL, RADARR_API_KEY,
-    MELBOURNE_TZ, GROUP_CHAT_ID, BOT_TOPIC_ID, SILENT_NOTIFICATIONS
+    MELBOURNE_TZ, GROUP_CHAT_ID, BOT_TOPIC_ID, SILENT_NOTIFICATIONS,
+    TAUTILLI_URL, TAUTILLI_API_KEY
 )
 from utils.helpers import send_command_response, escape_md
 
@@ -83,11 +84,11 @@ class RequestManager:
         """Get available root folders from Radarr"""
         if not (RADARR_URL and RADARR_API_KEY):
             return None, "Radarr not configured"
-        
+
         try:
             base_url = RADARR_URL.rstrip('/')
             headers = {"X-Api-Key": RADARR_API_KEY}
-            
+
             async with AsyncClient() as client:
                 # Try v3 first, then v2, then v1
                 for api_version in ["v3", "v2", "v1"]:
@@ -102,9 +103,9 @@ class RequestManager:
                             continue
                     except Exception:
                         continue
-                
-                return None, "All Radarr API versions failed"
-                
+
+                return None, "Server is offline. Please use /on to wake it up, then try again."
+
         except Exception as e:
             logger.error("❌ Radarr root folders fetch failed: %s", e)
             return None, str(e)
@@ -113,11 +114,11 @@ class RequestManager:
         """Get available quality profiles from Radarr"""
         if not (RADARR_URL and RADARR_API_KEY):
             return None, "Radarr not configured"
-        
+
         try:
             base_url = RADARR_URL.rstrip('/')
             headers = {"X-Api-Key": RADARR_API_KEY}
-            
+
             async with AsyncClient() as client:
                 # Try v3 first, then v2, then v1
                 for api_version in ["v3", "v2", "v1"]:
@@ -132,9 +133,9 @@ class RequestManager:
                             continue
                     except Exception:
                         continue
-                
-                return None, "All Radarr API versions failed"
-                
+
+                return None, "Server is offline. Please use /on to wake it up, then try again."
+
         except Exception as e:
             logger.error("❌ Radarr quality profiles fetch failed: %s", e)
             return None, str(e)
@@ -143,11 +144,11 @@ class RequestManager:
         """Get available root folders from Sonarr"""
         if not (SONARR_URL and SONARR_API_KEY):
             return None, "Sonarr not configured"
-        
+
         try:
             base_url = SONARR_URL.rstrip('/')
             headers = {"X-Api-Key": SONARR_API_KEY}
-            
+
             async with AsyncClient() as client:
                 # Try v3 first, then v2, then v1
                 for api_version in ["v3", "v2", "v1"]:
@@ -162,9 +163,9 @@ class RequestManager:
                             continue
                     except Exception:
                         continue
-                
-                return None, "All Sonarr API versions failed"
-                
+
+                return None, "Server is offline. Please use /on to wake it up, then try again."
+
         except Exception as e:
             logger.error("❌ Sonarr root folders fetch failed: %s", e)
             return None, str(e)
@@ -173,11 +174,11 @@ class RequestManager:
         """Get available quality profiles from Sonarr"""
         if not (SONARR_URL and SONARR_API_KEY):
             return None, "Sonarr not configured"
-        
+
         try:
             base_url = SONARR_URL.rstrip('/')
             headers = {"X-Api-Key": SONARR_API_KEY}
-            
+
             async with AsyncClient() as client:
                 # Try v3 first, then v2, then v1
                 for api_version in ["v3", "v2", "v1"]:
@@ -192,9 +193,9 @@ class RequestManager:
                             continue
                     except Exception:
                         continue
-                
-                return None, "All Sonarr API versions failed"
-                
+
+                return None, "Server is offline. Please use /on to wake it up, then try again."
+
         except Exception as e:
             logger.error("❌ Sonarr quality profiles fetch failed: %s", e)
             return None, str(e)
@@ -262,7 +263,147 @@ class RequestManager:
         except Exception as e:
             logger.error("❌ Sonarr series check failed: %s", e)
             return False, None
-    
+
+    async def get_tvdb_id_from_tmdb(self, tmdb_id: int):
+        """Get TVDB ID for a TV show from TMDB external_ids endpoint"""
+        if not TMDB_BEARER_TOKEN:
+            return None
+
+        try:
+            headers = {"Authorization": f"Bearer {TMDB_BEARER_TOKEN}", "accept": "application/json"}
+            async with AsyncClient() as client:
+                resp = await client.get(
+                    f"https://api.themoviedb.org/3/tv/{tmdb_id}/external_ids",
+                    headers=headers
+                )
+                if resp.status_code == 200:
+                    data = resp.json()
+                    tvdb_id = data.get("tvdb_id")
+                    if tvdb_id:
+                        logger.debug("Got TVDB ID %s for TMDB ID %s", tvdb_id, tmdb_id)
+                        return tvdb_id
+                return None
+        except Exception as e:
+            logger.debug("Failed to get TVDB ID from TMDB: %s", e)
+            return None
+
+    async def check_exists_in_plex(self, title: str, year: int = None, media_type: str = "movie"):
+        """
+        Check if content already exists in Plex library via Tautulli API
+
+        Args:
+            title: The title to search for
+            year: Optional release year for more accurate matching
+            media_type: "movie" or "show"
+
+        Returns:
+            (exists: bool, match_info: dict or None)
+        """
+        if not (TAUTILLI_URL and TAUTILLI_API_KEY):
+            return False, None
+
+        try:
+            base_url = TAUTILLI_URL.rstrip('/')
+
+            async with AsyncClient(timeout=10.0) as client:
+                # Use Tautulli's search API to find content in library
+                search_url = f"{base_url}/api/v2"
+                params = {
+                    "apikey": TAUTILLI_API_KEY,
+                    "cmd": "search",
+                    "query": title,
+                    "limit": 20
+                }
+
+                resp = await client.get(search_url, params=params)
+
+                if resp.status_code != 200:
+                    logger.debug("Tautulli search returned %d", resp.status_code)
+                    return False, None
+
+                result = resp.json()
+
+                if result.get("response", {}).get("result") != "success":
+                    logger.debug("Tautulli search not successful")
+                    return False, None
+
+                # Get search results - handle various response structures
+                data = result.get("response", {}).get("data", {})
+
+                # Debug log the structure
+                logger.debug("Tautulli search response data type: %s", type(data))
+
+                # Handle different Tautulli response formats
+                search_results = []
+                if isinstance(data, dict):
+                    # Standard format: {"results_list": [...]}
+                    search_results = data.get("results_list", [])
+                    # Alternative format: results directly in data
+                    if not search_results and "results" in data:
+                        search_results = data.get("results", [])
+                elif isinstance(data, list):
+                    # Sometimes data is the results list directly
+                    search_results = data
+
+                if not search_results:
+                    return False, None
+
+                # Normalize the search title for comparison
+                search_title_lower = title.lower().strip()
+
+                for item in search_results:
+                    # Skip if item is not a dictionary (could be string in some responses)
+                    if not isinstance(item, dict):
+                        logger.debug("Skipping non-dict search result item: %s", type(item))
+                        continue
+
+                    item_title = item.get("title", "").lower().strip()
+                    item_year = item.get("year")
+                    item_media_type = item.get("media_type", "").lower()
+
+                    # Map Tautulli media types to our types
+                    # Tautulli uses: movie, show, season, episode, artist, album, track
+                    type_match = False
+                    if media_type == "movie" and item_media_type == "movie":
+                        type_match = True
+                    elif media_type == "show" and item_media_type in ["show", "season", "episode"]:
+                        type_match = True
+
+                    if not type_match:
+                        continue
+
+                    # Check title match (exact or very close)
+                    title_match = (
+                        item_title == search_title_lower or
+                        search_title_lower in item_title or
+                        item_title in search_title_lower
+                    )
+
+                    if title_match:
+                        # If we have a year, verify it matches (allow 1 year difference)
+                        if year and item_year:
+                            try:
+                                if abs(int(item_year) - int(year)) <= 1:
+                                    logger.info("✅ Found '%s' (%s) in Plex library", item.get("title"), item_year)
+                                    return True, item
+                            except (ValueError, TypeError):
+                                pass
+                        elif not year:
+                            # No year provided, title match is enough
+                            logger.info("✅ Found '%s' in Plex library", item.get("title"))
+                            return True, item
+                        else:
+                            # Year provided but item has no year - still accept if title matches well
+                            if item_title == search_title_lower:
+                                logger.info("✅ Found '%s' in Plex library (exact title match)", item.get("title"))
+                                return True, item
+
+                return False, None
+
+        except Exception as e:
+            logger.error("❌ Plex library check failed: %s", e)
+            return False, None
+
     def get_poster_url(self, poster_path: str):
         """Get full TMDB poster URL"""
         if not poster_path:
@@ -333,10 +474,20 @@ class RequestManager:
             logger.error("❌ Error formatting TV result: %s", e)
             return f"❌ Error formatting TV result"
     
-    def create_movie_keyboard(self, movie: dict, index: int, total: int, search_id: str, already_exists: bool = False):
-        """Create inline keyboard for movie result"""
+    def create_movie_keyboard(self, movie: dict, index: int, total: int, search_id: str,
+                               already_in_radarr: bool = False, already_on_plex: bool = False):
+        """Create inline keyboard for movie result
+
+        Args:
+            movie: Movie data dict
+            index: Current result index
+            total: Total results
+            search_id: Search session ID
+            already_in_radarr: True if movie exists in Radarr
+            already_on_plex: True if movie exists in Plex library
+        """
         keyboard = []
-        
+
         # Navigation buttons (if multiple results)
         nav_row = []
         if index > 0:
@@ -345,7 +496,7 @@ class RequestManager:
             nav_row.append(InlineKeyboardButton("Next ▶️", callback_data=f"movie_nav_{search_id}_{index+1}"))
         if nav_row:
             keyboard.append(nav_row)
-        
+
         # External links
         external_row = []
         tmdb_id = movie.get("id")
@@ -356,26 +507,38 @@ class RequestManager:
             external_row.append(InlineKeyboardButton("🎭 IMDb", url=f"https://www.imdb.com/title/{imdb_id}"))
         if external_row:
             keyboard.append(external_row)
-        
-        # Add/Already Added button
+
+        # Add/Already Added button - Plex check takes priority
         action_row = []
-        if already_exists:
-            action_row.append(InlineKeyboardButton("✅ Already Added!", callback_data="already_added"))
+        if already_on_plex:
+            action_row.append(InlineKeyboardButton("✅ Already on Plex!", callback_data="already_on_plex"))
+        elif already_in_radarr:
+            action_row.append(InlineKeyboardButton("✅ Already in Radarr!", callback_data="already_added"))
         else:
             if RADARR_URL and RADARR_API_KEY:
                 action_row.append(InlineKeyboardButton("➕ Add Movie", callback_data=f"add_movie_{search_id}_{index}"))
             else:
                 action_row.append(InlineKeyboardButton("❌ Radarr Not Configured", callback_data="not_configured"))
-        
+
         action_row.append(InlineKeyboardButton("❌ Cancel", callback_data=f"cancel_search_{search_id}"))
         keyboard.append(action_row)
-        
+
         return InlineKeyboardMarkup(keyboard)
     
-    def create_tv_keyboard(self, show: dict, index: int, total: int, search_id: str, already_exists: bool = False):
-        """Create inline keyboard for TV show result"""
+    def create_tv_keyboard(self, show: dict, index: int, total: int, search_id: str,
+                            already_in_sonarr: bool = False, already_on_plex: bool = False):
+        """Create inline keyboard for TV show result
+
+        Args:
+            show: TV show data dict
+            index: Current result index
+            total: Total results
+            search_id: Search session ID
+            already_in_sonarr: True if show exists in Sonarr
+            already_on_plex: True if show exists in Plex library
+        """
         keyboard = []
-        
+
         # Navigation buttons (if multiple results)
         nav_row = []
         if index > 0:
@@ -384,7 +547,7 @@ class RequestManager:
             nav_row.append(InlineKeyboardButton("Next ▶️", callback_data=f"tv_nav_{search_id}_{index+1}"))
         if nav_row:
             keyboard.append(nav_row)
-        
+
         # External links
         external_row = []
         tmdb_id = show.get("id")
@@ -393,11 +556,13 @@ class RequestManager:
         # Note: TV shows don't have direct IMDb IDs in TMDB API, would need additional lookup
         if external_row:
             keyboard.append(external_row)
-        
-        # Add/Already Added button
+
+        # Add/Already Added button - Plex check takes priority
         action_row = []
-        if already_exists:
-            action_row.append(InlineKeyboardButton("✅ Already Added!", callback_data="already_added"))
+        if already_on_plex:
+            action_row.append(InlineKeyboardButton("✅ Already on Plex!", callback_data="already_on_plex"))
+        elif already_in_sonarr:
+            action_row.append(InlineKeyboardButton("✅ Already in Sonarr!", callback_data="already_added"))
         else:
             if SONARR_URL and SONARR_API_KEY:
                 action_row.append(InlineKeyboardButton("➕ Add Series", callback_data=f"add_tv_{search_id}_{index}"))
@@ -491,17 +656,34 @@ async def movie_command(update, context: CallbackContext):
             "current_index": 0
         }
         
-        # Check if first result already exists in Radarr
+        # Check if first result already exists
         first_movie = results[0]
         tmdb_id = first_movie.get("id")
-        already_exists = False
-        if tmdb_id:
+        title = first_movie.get("title", "")
+        year = None
+        if first_movie.get("release_date"):
+            try:
+                year = int(first_movie["release_date"][:4])
+            except (ValueError, IndexError):
+                pass
+
+        # Check Plex first (most authoritative - content is actually available)
+        already_on_plex = False
+        on_plex, _ = await request_manager.check_exists_in_plex(title, year, "movie")
+        already_on_plex = on_plex
+
+        # Then check Radarr (content is being managed/downloaded)
+        already_in_radarr = False
+        if tmdb_id and not already_on_plex:
             exists, _ = await request_manager.check_movie_exists_in_radarr(tmdb_id)
-            already_exists = exists
-        
+            already_in_radarr = exists
+
         # Format and send first result
         msg = request_manager.format_movie_result(first_movie, 0, len(results))
-        keyboard = request_manager.create_movie_keyboard(first_movie, 0, len(results), search_id, already_exists)
+        keyboard = request_manager.create_movie_keyboard(
+            first_movie, 0, len(results), search_id,
+            already_in_radarr=already_in_radarr, already_on_plex=already_on_plex
+        )
         poster_url = request_manager.get_poster_url(first_movie.get("poster_path"))
         
         await send_command_response_with_markup(update, context, msg, parse_mode=ParseMode.MARKDOWN_V2, reply_markup=keyboard, photo_url=poster_url)
@@ -546,15 +728,37 @@ async def series_command(update, context: CallbackContext):
             "current_index": 0
         }
         
-        # Check if first result already exists in Sonarr (would need TVDB ID lookup)
+        # Check if first result already exists
         first_show = results[0]
-        already_exists = False
-        # Note: TMDB TV results don't include TVDB IDs directly, would need additional API call
-        # For now, we'll skip the existence check for TV shows
-        
+        name = first_show.get("name", "")
+        year = None
+        if first_show.get("first_air_date"):
+            try:
+                year = int(first_show["first_air_date"][:4])
+            except (ValueError, IndexError):
+                pass
+
+        # Check Plex first (most authoritative - content is actually available)
+        already_on_plex = False
+        on_plex, _ = await request_manager.check_exists_in_plex(name, year, "show")
+        already_on_plex = on_plex
+
+        # Check Sonarr if not already on Plex (requires TVDB ID lookup from TMDB)
+        already_in_sonarr = False
+        if not already_on_plex:
+            tmdb_id = first_show.get("id")
+            if tmdb_id:
+                tvdb_id = await request_manager.get_tvdb_id_from_tmdb(tmdb_id)
+                if tvdb_id:
+                    exists, _ = await request_manager.check_series_exists_in_sonarr(tvdb_id)
+                    already_in_sonarr = exists
+
         # Format and send first result
         msg = request_manager.format_tv_result(first_show, 0, len(results))
-        keyboard = request_manager.create_tv_keyboard(first_show, 0, len(results), search_id, already_exists)
+        keyboard = request_manager.create_tv_keyboard(
+            first_show, 0, len(results), search_id,
+            already_in_sonarr=already_in_sonarr, already_on_plex=already_on_plex
+        )
         poster_url = request_manager.get_poster_url(first_show.get("poster_path"))
         
         await send_command_response_with_markup(update, context, msg, parse_mode=ParseMode.MARKDOWN_V2, reply_markup=keyboard, photo_url=poster_url)

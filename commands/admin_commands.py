@@ -14,8 +14,8 @@ from wakeonlan import send_magic_packet
 from config import (
     OFF_USER_IDS, MELBOURNE_TZ, GROUP_CHAT_ID, BOT_TOPIC_ID,
     WEEKDAY_WAKE_HOUR, WEEKDAY_WAKE_MINUTE, WEEKEND_WAKE_HOUR, WEEKEND_WAKE_MINUTE,
-    PLEX_MAC, PLEX_BROADCAST_IP, TAUTILLI_URL, JELLYFIN_URL, SONARR_URL, RADARR_URL,
-    JELLYFIN_API_KEY, TMDB_BEARER_TOKEN
+    PLEX_MAC, PLEX_BROADCAST_IP, TAUTILLI_URL, SONARR_URL, RADARR_URL,
+    TMDB_BEARER_TOKEN
 )
 from utils.helpers import send_command_response, send_to_bot_topic, escape_md
 from utils.server_status import scheduled_wake
@@ -35,7 +35,6 @@ async def debug_command(update, context: CallbackContext):
         msg += f"\\- Weekday wake: {WEEKDAY_WAKE_HOUR:02d}:{WEEKDAY_WAKE_MINUTE:02d}\n"
         msg += f"\\- Weekend wake: {WEEKEND_WAKE_HOUR:02d}:{WEEKEND_WAKE_MINUTE:02d}\n"
         msg += f"\\- Tautulli URL: {escape_md(TAUTILLI_URL[:50] + '...' if len(TAUTILLI_URL) > 50 else TAUTILLI_URL)}\n"
-        msg += f"\\- Jellyfin URL: {escape_md(JELLYFIN_URL[:50] + '...' if len(JELLYFIN_URL) > 50 else JELLYFIN_URL) if JELLYFIN_URL else 'Not configured'}\n"
         msg += f"\\- Sonarr URL: {escape_md(SONARR_URL[:50] + '...' if len(SONARR_URL) > 50 else SONARR_URL) if SONARR_URL else 'Not configured'}\n"
         msg += f"\\- Radarr URL: {escape_md(RADARR_URL[:50] + '...' if len(RADARR_URL) > 50 else RADARR_URL) if RADARR_URL else 'Not configured'}\n"
         
@@ -111,48 +110,6 @@ async def debug_command(update, context: CallbackContext):
     except Exception as e:
         logger.error("❌ Debug command failed: %s", e)
         await send_command_response(update, context, f"❌ Debug failed: {e}")
-
-async def testjellyfin_command(update, context: CallbackContext):
-    """Test Jellyfin API connectivity"""
-    if not (JELLYFIN_URL and JELLYFIN_API_KEY):
-        await send_command_response(update, context, "❌ Jellyfin not configured\\.", parse_mode=ParseMode.MARKDOWN_V2)
-        return
-    
-    try:
-        async with AsyncClient() as client:
-            await send_command_response(update, context, "🔍 Testing Jellyfin API\\.\\.\\.", parse_mode=ParseMode.MARKDOWN_V2)
-            
-            # Test sessions endpoint
-            base_url = JELLYFIN_URL.rstrip('/')
-            sessions_url = f"{base_url}/Sessions?api_key={JELLYFIN_API_KEY}"
-            
-            resp = await client.get(sessions_url)
-            
-            if resp.status_code == 200:
-                sessions = resp.json()
-                msg = "✅ *Jellyfin API Test Success*\n\n"
-                msg += f"*Sessions Endpoint:* ✅ \\({len(sessions)} sessions\\)\n"
-                
-                # Show active sessions if any
-                active_sessions = [s for s in sessions if s.get("NowPlayingItem")]
-                if active_sessions:
-                    msg += f"*Active Sessions:* {len(active_sessions)}\n"
-                    for session in active_sessions[:3]:  # Show first 3
-                        user = session.get("UserName", "Unknown")
-                        msg += f"\\- {escape_md(user)}\n"
-                else:
-                    msg += "*Active Sessions:* None"
-                    
-            else:
-                msg = f"❌ *Jellyfin API Test Failed*\n\n"
-                msg += f"Status Code: {resp.status_code}\n"
-                msg += "Check URL and API key configuration\\."
-                
-        await send_command_response(update, context, msg, parse_mode=ParseMode.MARKDOWN_V2)
-        
-    except Exception as e:
-        logger.error("❌ Jellyfin test failed: %s", e)
-        await send_command_response(update, context, f"❌ Test failed: {escape_md(str(e))}", parse_mode=ParseMode.MARKDOWN_V2)
 
 async def testrequest_command(update, context: CallbackContext):
     """Test request system APIs (TMDB, Sonarr, Radarr)"""
@@ -291,7 +248,8 @@ async def info_command(update, context: CallbackContext):
         
         msg += "*Request Commands:*\n"
         msg += "\\- `/movie <title>` \\- Search for movies to request\n"
-        msg += "\\- `/series <title>` or `/tv <title>` \\- Search for TV series\n\n"
+        msg += "\\- `/series <title>` or `/tv <title>` \\- Search for TV series\n"
+        msg += "\\- `/myrequests` or `/requests` \\- View your request history\n\n"
         
         msg += "*Server Commands:*\n"
         msg += "\\- `/on` \\- Wake server\n"
@@ -302,14 +260,18 @@ async def info_command(update, context: CallbackContext):
         msg += "\\- `/nowplaying` or `/np` \\- Current streams\n"
         msg += "\\- `/stats` \\- Weekly viewing statistics\n"
         msg += "\\- `/hot` \\- Trending content\n"
-        msg += "\\- `/upcoming` or `/up` \\- Upcoming releases\n\n"
+        msg += "\\- `/upcoming` or `/up` \\- Upcoming releases\n"
+        msg += "\\- `/queue` \\- View download queue status\n"
+        msg += "\\- `/search <title>` \\- Search Plex library\n\n"
         
         msg += "*Admin Commands:*\n"
         msg += "\\- `/debug` \\- Bot status info\n"
-        msg += "\\- `/testjellyfin` \\- Test Jellyfin API\n"
         msg += "\\- `/testrequest` \\- Test request system APIs\n"
         msg += "\\- `/testwake` \\- Test Wake\\-on\\-LAN\n"
         msg += "\\- `/logs` \\- Recent log entries\n"
+        msg += "\\- `/listrequests` \\- View all tracked requests\n"
+        msg += "\\- `/clearrequest <id>` \\- Remove a specific request\n"
+        msg += "\\- `/clearrequests` \\- Clear all completed requests\n"
         msg += "\\- `/info` \\- This help message\n\n"
         
         msg += "*Request System Features:*\n"
@@ -317,13 +279,17 @@ async def info_command(update, context: CallbackContext):
         msg += "\\- TMDB search with interactive navigation\n"
         msg += "\\- Automatic Radarr/Sonarr integration\n"
         msg += "\\- Smart detection of existing content\n"
-        msg += "\\- Support for multiple root folders/quality profiles\n\n"
+        msg += "\\- Support for multiple root folders/quality profiles\n"
+        msg += "\\- Request tracking with automatic notifications\n"
+        msg += "\\- Status updates every 15 minutes\n\n"
         
         msg += "*Automated Features:*\n"
         msg += f"\\- Auto\\-wake weekdays: {WEEKDAY_WAKE_HOUR:02d}:{WEEKDAY_WAKE_MINUTE:02d}\n"
         msg += f"\\- Auto\\-wake weekends: {WEEKEND_WAKE_HOUR:02d}:{WEEKEND_WAKE_MINUTE:02d}\n"
         msg += "\\- Smart server detection \\(skips wake if already online\\)\n"
-        msg += "\\- 30\\-minute grace period for missed schedules"
+        msg += "\\- 30\\-minute grace period for missed schedules\n"
+        msg += "\\- New content notifications \\(checks every 5 mins\\)\n"
+        msg += "\\- Smart duplicate detection \\(no double notifications\\)"
         
         await send_command_response(update, context, msg, parse_mode=ParseMode.MARKDOWN_V2)
         
@@ -356,7 +322,173 @@ async def welcome_command(update, context: CallbackContext):
         msg += "Use `/debug` to check bot configuration and status\\."
         
         await send_command_response(update, context, msg, parse_mode=ParseMode.MARKDOWN_V2)
-        
+
     except Exception as e:
         logger.error("❌ Welcome command failed: %s", e)
         await send_command_response(update, context, f"❌ Failed to show welcome: {escape_md(str(e))}", parse_mode=ParseMode.MARKDOWN_V2)
+
+
+async def requests_admin_command(update, context: CallbackContext):
+    """List all tracked requests (admin command)"""
+    user_id = update.effective_user.id
+    if user_id not in OFF_USER_IDS:
+        return await send_command_response(update, context, "❌ Not authorized.")
+
+    try:
+        from utils.request_tracker import request_tracker
+
+        all_requests = request_tracker.requests.get("requests", [])
+
+        if not all_requests:
+            await send_command_response(update, context, "📭 No requests in the database\\.", parse_mode=ParseMode.MARKDOWN_V2)
+            return
+
+        # Group by status
+        pending = [r for r in all_requests if not r.get("notified", False) and r.get("status") != "unreleased"]
+        unreleased = [r for r in all_requests if r.get("status") == "unreleased"]
+        completed = [r for r in all_requests if r.get("notified", False)]
+
+        msg = "📋 *All Tracked Requests*\n\n"
+
+        if pending:
+            msg += f"*🔄 Pending \\({len(pending)}\\):*\n"
+            for req in pending[:10]:  # Limit to 10
+                media_emoji = "🎬" if req["media_type"] == "movie" else "📺"
+                title = escape_md(req.get("title", "Unknown"))
+                user = escape_md(req.get("username", "Unknown"))
+                status = escape_md(req.get("status", "pending"))
+                req_id = escape_md(req.get("id", "")[:20])
+                msg += f"{media_emoji} {title} \\- @{user}\n"
+                msg += f"   Status: {status} \\| ID: `{req_id}`\n"
+            if len(pending) > 10:
+                msg += f"   _\\.\\.\\. and {len(pending) - 10} more_\n"
+            msg += "\n"
+
+        if unreleased:
+            msg += f"*📅 Unreleased \\({len(unreleased)}\\):*\n"
+            for req in unreleased[:5]:
+                media_emoji = "🎬" if req["media_type"] == "movie" else "📺"
+                title = escape_md(req.get("title", "Unknown"))
+                release = req.get("release_date", "Unknown")
+                req_id = escape_md(req.get("id", "")[:20])
+                msg += f"{media_emoji} {title} \\- {escape_md(release)}\n"
+                msg += f"   ID: `{req_id}`\n"
+            if len(unreleased) > 5:
+                msg += f"   _\\.\\.\\. and {len(unreleased) - 5} more_\n"
+            msg += "\n"
+
+        if completed:
+            msg += f"*✅ Completed \\({len(completed)}\\):*\n"
+            for req in completed[:5]:
+                media_emoji = "🎬" if req["media_type"] == "movie" else "📺"
+                title = escape_md(req.get("title", "Unknown"))
+                req_id = escape_md(req.get("id", "")[:20])
+                msg += f"{media_emoji} {title}\n"
+                msg += f"   ID: `{req_id}`\n"
+            if len(completed) > 5:
+                msg += f"   _\\.\\.\\. and {len(completed) - 5} more_\n"
+            msg += "\n"
+
+        msg += f"*Total: {len(all_requests)} requests*\n\n"
+        msg += "_Use `/clearrequest <id>` to remove a specific request_\n"
+        msg += "_Use `/clearrequests` to remove all completed requests_"
+
+        await send_command_response(update, context, msg, parse_mode=ParseMode.MARKDOWN_V2)
+
+    except Exception as e:
+        logger.error("❌ Requests admin command failed: %s", e)
+        await send_command_response(update, context, f"❌ Failed to list requests: {escape_md(str(e))}", parse_mode=ParseMode.MARKDOWN_V2)
+
+
+async def clearrequest_command(update, context: CallbackContext):
+    """Remove a specific request by ID"""
+    user_id = update.effective_user.id
+    if user_id not in OFF_USER_IDS:
+        return await send_command_response(update, context, "❌ Not authorized.")
+
+    if not context.args:
+        await send_command_response(
+            update, context,
+            "❌ Please provide a request ID\\.\n\nUsage: `/clearrequest <id>`\n\nUse `/requests` to see all request IDs\\.",
+            parse_mode=ParseMode.MARKDOWN_V2
+        )
+        return
+
+    request_id = context.args[0]
+
+    try:
+        from utils.request_tracker import request_tracker
+
+        # Find and remove the request
+        original_count = len(request_tracker.requests["requests"])
+        request_tracker.requests["requests"] = [
+            r for r in request_tracker.requests["requests"]
+            if not r.get("id", "").startswith(request_id)
+        ]
+        new_count = len(request_tracker.requests["requests"])
+
+        removed = original_count - new_count
+
+        if removed > 0:
+            request_tracker._save_requests()
+            await send_command_response(
+                update, context,
+                f"✅ Removed {removed} request\\(s\\) matching `{escape_md(request_id)}`",
+                parse_mode=ParseMode.MARKDOWN_V2
+            )
+            logger.info("🗑️ Admin %s removed %d request(s) matching '%s'",
+                       update.effective_user.username, removed, request_id)
+        else:
+            await send_command_response(
+                update, context,
+                f"❌ No request found matching `{escape_md(request_id)}`\n\nUse `/requests` to see all request IDs\\.",
+                parse_mode=ParseMode.MARKDOWN_V2
+            )
+
+    except Exception as e:
+        logger.error("❌ Clear request command failed: %s", e)
+        await send_command_response(update, context, f"❌ Failed to remove request: {escape_md(str(e))}", parse_mode=ParseMode.MARKDOWN_V2)
+
+
+async def clearrequests_command(update, context: CallbackContext):
+    """Clear all completed/notified requests"""
+    user_id = update.effective_user.id
+    if user_id not in OFF_USER_IDS:
+        return await send_command_response(update, context, "❌ Not authorized.")
+
+    try:
+        from utils.request_tracker import request_tracker
+
+        # Count completed requests
+        original_count = len(request_tracker.requests["requests"])
+        completed_count = len([r for r in request_tracker.requests["requests"] if r.get("notified", False)])
+
+        if completed_count == 0:
+            await send_command_response(
+                update, context,
+                "📭 No completed requests to clear\\.",
+                parse_mode=ParseMode.MARKDOWN_V2
+            )
+            return
+
+        # Remove completed requests
+        request_tracker.requests["requests"] = [
+            r for r in request_tracker.requests["requests"]
+            if not r.get("notified", False)
+        ]
+        request_tracker._save_requests()
+
+        remaining = len(request_tracker.requests["requests"])
+
+        await send_command_response(
+            update, context,
+            f"✅ Cleared {completed_count} completed request\\(s\\)\\.\n\n"
+            f"📋 {remaining} pending request\\(s\\) remaining\\.",
+            parse_mode=ParseMode.MARKDOWN_V2
+        )
+        logger.info("🗑️ Admin %s cleared %d completed requests",
+                   update.effective_user.username, completed_count)
+
+    except Exception as e:
+        logger.error("❌ Clear requests command failed: %s", e)
+        await send_command_response(update, context, f"❌ Failed to clear requests: {escape_md(str(e))}", parse_mode=ParseMode.MARKDOWN_V2)

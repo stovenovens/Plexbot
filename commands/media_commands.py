@@ -11,7 +11,7 @@ from telegram.constants import ParseMode
 from httpx import AsyncClient
 
 from config import (
-    TAUTILLI_URL, TAUTILLI_API_KEY, JELLYFIN_URL, JELLYFIN_API_KEY,
+    TAUTILLI_URL, TAUTILLI_API_KEY,
     SONARR_URL, SONARR_API_KEY, RADARR_URL, RADARR_API_KEY,
     TMDB_BEARER_TOKEN, MELBOURNE_TZ
 )
@@ -292,69 +292,6 @@ def format_radarr_movie(movie):
         logger.error("Error formatting Radarr movie: %s", e)
         return f"\\- {escape_md(movie.get('title', 'Unknown'))} \\- Error formatting"
 
-# --- Jellyfin Functions ---
-async def fetch_jellyfin_sessions(client):
-    """Get active sessions from Jellyfin"""
-    if not (JELLYFIN_URL and JELLYFIN_API_KEY):
-        return None
-    
-    try:
-        base_url = JELLYFIN_URL.rstrip('/')
-        url = f"{base_url}/Sessions?api_key={JELLYFIN_API_KEY}"
-        logger.debug("Fetching Jellyfin sessions from: %s", url.replace(JELLYFIN_API_KEY, "***"))
-        
-        resp = await client.get(url)
-        resp.raise_for_status()
-        sessions = resp.json()
-        
-        logger.info("✅ Jellyfin sessions fetched successfully: %d sessions", len(sessions))
-        return sessions
-        
-    except Exception as e:
-        logger.error("❌ Jellyfin sessions fetch failed: %s", e)
-        return None
-
-def format_jellyfin_session(session):
-    """Format a Jellyfin session for display"""
-    try:
-        user = session.get("UserName", "Unknown")
-        now_playing = session.get("NowPlayingItem", {})
-        
-        if now_playing:
-            media_type = now_playing.get("Type", "").lower()
-            name = now_playing.get("Name", "Unknown")
-            
-            if media_type == "episode":
-                series = now_playing.get("SeriesName", "")
-                season = now_playing.get("ParentIndexNumber", "")
-                episode = now_playing.get("IndexNumber", "")
-                if series and season and episode:
-                    title = f"{series} S{season:02d}E{episode:02d}: {name}"
-                elif series:
-                    title = f"{series}: {name}"
-                else:
-                    title = name
-            else:
-                title = name
-        else:
-            title = "Idle"
-        
-        play_state = session.get("PlayState", {})
-        is_paused = play_state.get("IsPaused", False)
-        state = "Paused" if is_paused else "Playing"
-        device = session.get("DeviceName", "Unknown Device")
-        
-        user_safe = escape_md(user)
-        title_safe = escape_md(title)
-        state_safe = escape_md(state)
-        device_safe = escape_md(device)
-        
-        return f"\\- {user_safe} – {title_safe} – {device_safe} \\({state_safe}\\)"
-        
-    except Exception as e:
-        logger.error("Error formatting Jellyfin session: %s", e)
-        return f"\\- {escape_md(session.get('UserName', 'Unknown'))} – Error formatting session"
-
 # --- Tautulli Functions ---
 def get_stream_type(session_data):
     """Determine the stream type from Tautulli session data"""
@@ -531,22 +468,6 @@ async def nowplaying_command(update, context: CallbackContext):
             except Exception as e:
                 logger.error("❌ Tautulli fetch failed: %s", e)
                 lines.append("\n*Plex:* Data unavailable")
-
-            # Jellyfin data
-            jellyfin_sessions = await fetch_jellyfin_sessions(client)
-            if jellyfin_sessions is not None:
-                active_sessions = [s for s in jellyfin_sessions if s.get("NowPlayingItem") or s.get("PlayState", {}).get("PositionTicks", 0) > 0]
-                
-                if active_sessions:
-                    lines.append("\n*Jellyfin:*")
-                    for session in active_sessions:
-                        formatted_session = format_jellyfin_session(session)
-                        lines.append(formatted_session)
-                else:
-                    lines.append("\n*Jellyfin:* No active streams")
-            else:
-                if JELLYFIN_URL and JELLYFIN_API_KEY:
-                    lines.append("\n*Jellyfin:* Data unavailable")
 
         msg = "\n".join(lines)
         
@@ -787,3 +708,335 @@ async def upcoming_command(update, context: CallbackContext):
     except Exception as e:
         logger.error("❌ Error in upcoming command: %s", e)
         await send_command_response(update, context, "❌ Could not fetch upcoming releases\\. Check logs for details\\.", parse_mode=ParseMode.MARKDOWN_V2)
+
+async def queue_command(update, context: CallbackContext):
+    """Show current download queue from Radarr and Sonarr"""
+    try:
+        async with AsyncClient(timeout=10.0) as client:
+            await send_command_response(update, context, "📥 Fetching download queue\\.\\.\\.", parse_mode=ParseMode.MARKDOWN_V2)
+
+            msg = "📥 *Download Queue*\n\n"
+            total_items = 0
+
+            # Fetch Radarr queue
+            radarr_items = []
+            if RADARR_URL and RADARR_API_KEY:
+                try:
+                    base_url = RADARR_URL.rstrip('/')
+                    headers = {"X-Api-Key": RADARR_API_KEY}
+
+                    # Try API versions
+                    for api_version in ["v3", "v2", "v1"]:
+                        url = f"{base_url}/api/{api_version}/queue"
+                        try:
+                            resp = await client.get(url, headers=headers)
+                            if resp.status_code == 200:
+                                data = resp.json()
+                                radarr_items = data.get("records", [])
+                                logger.info("✅ Fetched %d items from Radarr queue (API %s)", len(radarr_items), api_version)
+                                break
+                        except Exception:
+                            continue
+                except Exception as e:
+                    logger.error("❌ Failed to fetch Radarr queue: %s", e)
+
+            # Fetch Sonarr queue
+            sonarr_items = []
+            if SONARR_URL and SONARR_API_KEY:
+                try:
+                    base_url = SONARR_URL.rstrip('/')
+                    headers = {"X-Api-Key": SONARR_API_KEY}
+
+                    # Try API versions
+                    for api_version in ["v3", "v2", "v1"]:
+                        url = f"{base_url}/api/{api_version}/queue"
+                        try:
+                            resp = await client.get(url, headers=headers)
+                            if resp.status_code == 200:
+                                data = resp.json()
+                                sonarr_items = data.get("records", [])
+                                logger.info("✅ Fetched %d items from Sonarr queue (API %s)", len(sonarr_items), api_version)
+                                break
+                        except Exception:
+                            continue
+                except Exception as e:
+                    logger.error("❌ Failed to fetch Sonarr queue: %s", e)
+
+            # Format Radarr items (Movies)
+            if radarr_items:
+                msg += "*🎬 Movies:*\n"
+                for item in radarr_items[:10]:  # Limit to 10
+                    title = escape_md(item.get("title", "Unknown"))
+                    status = item.get("status", "unknown").lower()
+
+                    # Get progress info
+                    size_left = item.get("sizeleft", 0)
+                    size_total = item.get("size", 1)
+                    progress = ((size_total - size_left) / size_total * 100) if size_total > 0 else 0
+
+                    # Get status details
+                    status_messages = item.get("statusMessages", [])
+                    error_msg = ""
+                    if status_messages:
+                        for msg_obj in status_messages:
+                            messages = msg_obj.get("messages", [])
+                            if messages:
+                                error_msg = escape_md(f" - {messages[0][:50]}")
+
+                    # Format status emoji
+                    if status == "downloading":
+                        status_emoji = "⬇️"
+                        status_text = f"{progress:.0f}%"
+                    elif status == "queued":
+                        status_emoji = "⏳"
+                        status_text = "Queued"
+                    elif status == "paused":
+                        status_emoji = "⏸️"
+                        status_text = "Paused"
+                    elif status == "warning":
+                        status_emoji = "⚠️"
+                        status_text = "Warning"
+                    elif status == "failed":
+                        status_emoji = "❌"
+                        status_text = "Failed"
+                    else:
+                        status_emoji = "📦"
+                        status_text = escape_md(status.title())
+
+                    msg += f"{status_emoji} {title} – {escape_md(status_text)}{error_msg}\n"
+                    total_items += 1
+
+                if len(radarr_items) > 10:
+                    msg += f"\\.\\.\\. and {len(radarr_items) - 10} more movies\n"
+                msg += "\n"
+            elif RADARR_URL and RADARR_API_KEY:
+                msg += "*🎬 Movies:* Queue empty\n\n"
+
+            # Format Sonarr items (TV Shows)
+            if sonarr_items:
+                msg += "*📺 TV Shows:*\n"
+                for item in sonarr_items[:10]:  # Limit to 10
+                    series_title = item.get("series", {}).get("title", "Unknown")
+                    episode = item.get("episode", {})
+                    season_num = episode.get("seasonNumber", 0)
+                    episode_num = episode.get("episodeNumber", 0)
+                    episode_title = episode.get("title", "")
+
+                    full_title = f"{series_title} S{season_num:02d}E{episode_num:02d}"
+                    if episode_title:
+                        full_title += f" - {episode_title}"
+                    full_title = escape_md(full_title)
+
+                    status = item.get("status", "unknown").lower()
+
+                    # Get progress info
+                    size_left = item.get("sizeleft", 0)
+                    size_total = item.get("size", 1)
+                    progress = ((size_total - size_left) / size_total * 100) if size_total > 0 else 0
+
+                    # Get status details
+                    status_messages = item.get("statusMessages", [])
+                    error_msg = ""
+                    if status_messages:
+                        for msg_obj in status_messages:
+                            messages = msg_obj.get("messages", [])
+                            if messages:
+                                error_msg = escape_md(f" - {messages[0][:50]}")
+
+                    # Format status emoji
+                    if status == "downloading":
+                        status_emoji = "⬇️"
+                        status_text = f"{progress:.0f}%"
+                    elif status == "queued":
+                        status_emoji = "⏳"
+                        status_text = "Queued"
+                    elif status == "paused":
+                        status_emoji = "⏸️"
+                        status_text = "Paused"
+                    elif status == "warning":
+                        status_emoji = "⚠️"
+                        status_text = "Warning"
+                    elif status == "failed":
+                        status_emoji = "❌"
+                        status_text = "Failed"
+                    else:
+                        status_emoji = "📦"
+                        status_text = escape_md(status.title())
+
+                    msg += f"{status_emoji} {full_title} – {escape_md(status_text)}{error_msg}\n"
+                    total_items += 1
+
+                if len(sonarr_items) > 10:
+                    msg += f"\\.\\.\\. and {len(sonarr_items) - 10} more episodes\n"
+                msg += "\n"
+            elif SONARR_URL and SONARR_API_KEY:
+                msg += "*📺 TV Shows:* Queue empty\n\n"
+
+            # Summary
+            if total_items == 0:
+                msg += "✅ No active downloads"
+            else:
+                msg += f"*Total:* {total_items} item{'s' if total_items != 1 else ''} in queue"
+
+            # Check if no services configured
+            if not (RADARR_URL or SONARR_URL):
+                msg = "❌ No Radarr/Sonarr configured\\. Check environment variables\\."
+
+            try:
+                await send_command_response(update, context, msg, parse_mode=ParseMode.MARKDOWN_V2)
+            except Exception as markdown_error:
+                logger.error("❌ Markdown parsing error in queue: %s", markdown_error)
+                plain_msg = msg.replace("\\", "").replace("*", "").replace("_", "")
+                await send_command_response(update, context, f"📥 Download Queue\n\n{plain_msg}")
+
+    except Exception as e:
+        logger.error("❌ Error in queue command: %s", e)
+        await send_command_response(update, context, "❌ Could not fetch queue data\\. Check logs for details\\.", parse_mode=ParseMode.MARKDOWN_V2)
+
+
+async def search_plex_command(update, context: CallbackContext):
+    """Search Plex library for content via Tautulli"""
+    if not context.args:
+        await send_command_response(
+            update, context,
+            "❌ Please provide a search term\\.\n\nUsage: `/search <title>`\n\nExample: `/search Breaking Bad`",
+            parse_mode=ParseMode.MARKDOWN_V2
+        )
+        return
+
+    query = " ".join(context.args)
+    user = update.effective_user
+
+    logger.info("🔍 Plex search requested by %s: '%s'",
+                user.username or user.first_name, query)
+
+    try:
+        await send_command_response(
+            update, context,
+            f"🔍 Searching Plex for: *{escape_md(query)}*",
+            parse_mode=ParseMode.MARKDOWN_V2
+        )
+
+        if not (TAUTILLI_URL and TAUTILLI_API_KEY):
+            await send_command_response(
+                update, context,
+                "❌ Tautulli not configured\\. Cannot search Plex library\\.",
+                parse_mode=ParseMode.MARKDOWN_V2
+            )
+            return
+
+        # Search Plex via Tautulli
+        base_url = TAUTILLI_URL.rstrip('/')
+
+        async with AsyncClient(timeout=15.0) as client:
+            params = {
+                "apikey": TAUTILLI_API_KEY,
+                "cmd": "search",
+                "query": query,
+                "limit": 25
+            }
+
+            resp = await client.get(f"{base_url}/api/v2", params=params)
+
+            if resp.status_code != 200:
+                await send_command_response(
+                    update, context,
+                    "❌ Failed to search Plex library\\.",
+                    parse_mode=ParseMode.MARKDOWN_V2
+                )
+                return
+
+            result = resp.json()
+
+            if result.get("response", {}).get("result") != "success":
+                await send_command_response(
+                    update, context,
+                    "❌ Plex search failed\\.",
+                    parse_mode=ParseMode.MARKDOWN_V2
+                )
+                return
+
+            # Get search results - handle various response formats
+            data = result.get("response", {}).get("data", {})
+
+            results_list = []
+            if isinstance(data, dict):
+                results_list = data.get("results_list", [])
+                if not results_list and "results" in data:
+                    results_list = data.get("results", [])
+            elif isinstance(data, list):
+                results_list = data
+
+            if not results_list:
+                await send_command_response(
+                    update, context,
+                    f"❌ No results found for: *{escape_md(query)}*\n\n"
+                    f"_Try `/movie {escape_md(query)}` or `/tv {escape_md(query)}` to request it\\._",
+                    parse_mode=ParseMode.MARKDOWN_V2
+                )
+                return
+
+            # Group results by media type
+            movies = []
+            shows = []
+            other = []
+
+            for item in results_list:
+                # Skip if item is not a dictionary (could be string in some responses)
+                if not isinstance(item, dict):
+                    logger.debug("Skipping non-dict search result: %s", type(item))
+                    continue
+                media_type = item.get("media_type", "").lower()
+                if media_type == "movie":
+                    movies.append(item)
+                elif media_type in ["show", "season", "episode"]:
+                    # Only add shows, skip seasons/episodes to avoid duplicates
+                    if media_type == "show":
+                        shows.append(item)
+                else:
+                    other.append(item)
+
+            # Build message
+            msg = f"🔍 *Plex Search Results for:* {escape_md(query)}\n\n"
+
+            if movies:
+                msg += f"*🎬 Movies \\({len(movies)}\\):*\n"
+                for movie in movies[:8]:
+                    title = escape_md(movie.get("title", "Unknown"))
+                    year = movie.get("year", "")
+                    year_str = f" \\({year}\\)" if year else ""
+                    msg += f"• {title}{year_str}\n"
+                if len(movies) > 8:
+                    msg += f"  _\\.\\.\\. and {len(movies) - 8} more_\n"
+                msg += "\n"
+
+            if shows:
+                msg += f"*📺 TV Shows \\({len(shows)}\\):*\n"
+                for show in shows[:8]:
+                    title = escape_md(show.get("title", "Unknown"))
+                    year = show.get("year", "")
+                    year_str = f" \\({year}\\)" if year else ""
+                    msg += f"• {title}{year_str}\n"
+                if len(shows) > 8:
+                    msg += f"  _\\.\\.\\. and {len(shows) - 8} more_\n"
+                msg += "\n"
+
+            if not movies and not shows and other:
+                msg += f"*Other Results \\({len(other)}\\):*\n"
+                for item in other[:5]:
+                    title = escape_md(item.get("title", "Unknown"))
+                    msg += f"• {title}\n"
+                msg += "\n"
+
+            total = len(movies) + len(shows)
+            msg += f"✅ Found {total} result{'s' if total != 1 else ''} on Plex"
+
+            await send_command_response(update, context, msg, parse_mode=ParseMode.MARKDOWN_V2)
+
+    except Exception as e:
+        logger.error("❌ Plex search command failed: %s", e)
+        await send_command_response(
+            update, context,
+            f"❌ Search failed: {escape_md(str(e))}",
+            parse_mode=ParseMode.MARKDOWN_V2
+        )

@@ -11,6 +11,23 @@ from config import GROUP_CHAT_ID, BOT_TOPIC_ID, SILENT_NOTIFICATIONS
 
 logger = logging.getLogger(__name__)
 
+def is_bot_topic(update) -> bool:
+    """Check if message is from the bot topic"""
+    if not update.message:
+        return False
+
+    # Check if message has message_thread_id (topic ID)
+    if hasattr(update.message, 'message_thread_id'):
+        thread_id = update.message.message_thread_id
+        # Allow if in bot topic or no topic (backwards compatibility)
+        is_valid = thread_id == BOT_TOPIC_ID or thread_id is None
+        if not is_valid:
+            logger.info("⛔ Command ignored - not from bot topic (thread_id: %s)", thread_id)
+        return is_valid
+
+    # If no thread_id attribute, allow (backwards compatibility)
+    return True
+
 def escape_md(text: str) -> str:
     """Escape markdown V2 special characters"""
     if text is None:
@@ -45,31 +62,26 @@ def format_duration(seconds):
         return f"{minutes}m"
 
 async def send_command_response(update, context: CallbackContext, message: str, parse_mode=None, silent=None):
-    """Send command response to bot topic instead of where command was issued"""
+    """Send command response to bot topic
+
+    Note: Commands are now filtered to only work in bot topic (ID 15980),
+    so this will always send to the bot topic where the command originated.
+    """
     # Use config setting if not explicitly specified
     if silent is None:
         silent = SILENT_NOTIFICATIONS
-        
+
     try:
-        # Always send to bot topic for cleaner general chat
+        # Send to bot topic
         await context.bot.send_message(
             chat_id=GROUP_CHAT_ID,
             text=message,
             message_thread_id=BOT_TOPIC_ID,
             parse_mode=parse_mode,
-            disable_notification=silent  # Make notifications silent
+            disable_notification=silent
         )
         logger.info("✅ Command response sent to bot topic (silent: %s)", silent)
-        
-        # If command was issued outside bot topic, send a redirect message
-        # Check if update.message exists and has message_thread_id
-        if (update.message and 
-            hasattr(update.message, 'message_thread_id') and 
-            update.message.message_thread_id != BOT_TOPIC_ID):
-            redirect_msg = f"👀 Response sent to bot topic"
-            await update.message.reply_text(redirect_msg, disable_notification=silent)
-            logger.info("✅ Redirect message sent to original location (silent: %s)", silent)
-            
+
     except Exception as e:
         logger.error("❌ Failed to send command response: %s", e)
         # Fallback: send to where command was issued

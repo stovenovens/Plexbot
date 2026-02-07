@@ -1,10 +1,12 @@
 """
 Server control commands
 Handles server wake, shutdown, and status commands
+Updated for Ubuntu 24.04 compatibility
 """
 
 import logging
 import paramiko
+import time
 from telegram.ext import CallbackContext
 from telegram.constants import ParseMode
 from wakeonlan import send_magic_packet
@@ -35,15 +37,73 @@ async def off_command(update, context: CallbackContext):
         return await send_command_response(update, context, "❌ Not authorized.")
     
     try:
+        logger.info("🔌 Attempting to shutdown server %s", PLEX_SERVER_IP)
+        
         ssh = paramiko.SSHClient()
         ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-        ssh.connect(PLEX_SERVER_IP, username=PLEX_SSH_USER, password=PLEX_SSH_PASSWORD)
-        stdin, stdout, stderr = ssh.exec_command('sudo -S shutdown -h now', get_pty=True)
-        stdin.write(PLEX_SSH_PASSWORD + '\n')
-        stdin.flush()
+        
+        # Connect with longer timeout for Ubuntu 24.04
+        ssh.connect(
+            PLEX_SERVER_IP, 
+            username=PLEX_SSH_USER, 
+            password=PLEX_SSH_PASSWORD,
+            timeout=10
+        )
+        
+        # Try multiple shutdown methods for Ubuntu 24.04 compatibility
+        shutdown_commands = [
+            'sudo -S shutdown -h now',     # Traditional method
+            'sudo -S poweroff',             # Alternative method
+            'sudo -S systemctl poweroff'    # Systemd method
+        ]
+        
+        success = False
+        for i, cmd in enumerate(shutdown_commands):
+            try:
+                logger.info("🔌 Trying shutdown method %d: %s", i + 1, cmd)
+                
+                stdin, stdout, stderr = ssh.exec_command(cmd, get_pty=True, timeout=30)
+                
+                # Send password
+                stdin.write(PLEX_SSH_PASSWORD + '\n')
+                stdin.flush()
+                
+                # Wait a bit for command to process
+                time.sleep(2)
+                
+                # Check if command executed (stderr should be empty or contain expected output)
+                error_output = stderr.read().decode('utf-8').strip()
+                stdout_output = stdout.read().decode('utf-8').strip()
+                
+                logger.info("🔌 Command output: stdout='%s', stderr='%s'", stdout_output, error_output)
+                
+                # If no critical errors, consider it successful
+                if not error_output or 'shutdown scheduled' in error_output.lower() or len(error_output) < 50:
+                    logger.info("✅ Shutdown command successful with method %d", i + 1)
+                    success = True
+                    break
+                else:
+                    logger.warning("⚠️ Method %d failed with error: %s", i + 1, error_output)
+                    
+            except Exception as cmd_error:
+                logger.warning("⚠️ Shutdown method %d failed: %s", i + 1, str(cmd_error))
+                continue
+        
         ssh.close()
-        logger.info("✅ Shutdown command sent to %s", PLEX_SERVER_IP)
-        await send_command_response(update, context, "🔌 Plex server is shutting down.")
+        
+        if success:
+            logger.info("✅ Shutdown command sent to %s", PLEX_SERVER_IP)
+            await send_command_response(update, context, "🔌 Plex server is shutting down.")
+        else:
+            logger.error("❌ All shutdown methods failed")
+            await send_command_response(update, context, "❌ Shutdown failed - all methods exhausted.")
+            
+    except paramiko.AuthenticationException:
+        logger.error("❌ SSH Authentication failed")
+        await send_command_response(update, context, "❌ SSH authentication failed.")
+    except paramiko.SSHException as ssh_error:
+        logger.error("❌ SSH connection failed: %s", ssh_error)
+        await send_command_response(update, context, "❌ SSH connection failed.")
     except Exception as e:
         logger.error("❌ Shutdown failed: %s", e)
         await send_command_response(update, context, "❌ Shutdown failed.")

@@ -1,0 +1,12 @@
+services:
+  plexbot:
+    build: .
+    container_name: plexbot
+    restart: unless-stopped
+    network_mode: host
+    env_file:
+      - .env
+    volumes:
+      - ./data:/app/data
+    stop_signal: SIGTERM
+    stop_grace_period: 10s

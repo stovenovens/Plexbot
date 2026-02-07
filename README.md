@@ -72,6 +72,42 @@ The bot includes a Searcharr-like request system that allows anyone in the group
 4. Copy `.env.example` to `.env` and configure your settings
 5. Run the bot: `python main.py`
 
+## Docker Deployment
+
+### Quick Start
+
+```bash
+git clone https://github.com/stovenovens/Plexbot.git
+cd Plexbot
+cp .env.example .env
+# Edit .env with your settings
+docker compose up -d
+```
+
+### Managing the Bot
+
+```bash
+# View logs
+docker compose logs -f
+
+# Stop the bot
+docker compose down
+
+# Restart after config changes
+docker compose restart
+
+# Rebuild after code updates
+docker compose up -d --build
+```
+
+### Data Persistence
+
+Request tracking data is stored in the `data/` directory, which is mounted as a volume. Your data persists across container restarts and rebuilds.
+
+### Wake-on-LAN Note
+
+The Docker setup uses `network_mode: host` so that Wake-on-LAN broadcast packets can reach your local network. This means the container shares your host's network stack. If you run the bot on a machine that is not on the same LAN as your Plex server, WOL will not work regardless of Docker configuration.
+
 ## Configuration
 
 ### Required

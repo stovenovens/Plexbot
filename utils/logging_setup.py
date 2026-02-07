@@ -27,9 +27,14 @@ def setup_logging():
     for handler in root_logger.handlers[:]:
         root_logger.removeHandler(handler)
     
+    # Ensure logs directory exists
+    log_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'logs')
+    os.makedirs(log_dir, exist_ok=True)
+    log_file = os.path.join(log_dir, 'bot.log')
+
     # File handler that overwrites the log file each session (mode='w')
     file_handler = logging.FileHandler(
-        'bot.log',  # In the same directory as the script
+        log_file,
         mode='w',   # This clears the file each time
         encoding='utf-8'
     )
@@ -56,7 +61,7 @@ def setup_logging():
     logging.info("=" * 60)
     logging.info("🤖 PLEX BOT SESSION START")
     logging.info("🕐 Session started: %s", melbourne_time.strftime('%Y-%m-%d %H:%M:%S %Z'))
-    logging.info("📁 Log file: %s", os.path.abspath('bot.log'))
+    logging.info("📁 Log file: %s", log_file)
     logging.info("📝 This log file is cleared each session")
     logging.info("=" * 60)
     

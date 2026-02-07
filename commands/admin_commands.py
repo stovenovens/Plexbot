@@ -5,6 +5,7 @@ Updated to include request system information
 """
 
 import logging
+import os
 from datetime import datetime
 from telegram.ext import CallbackContext
 from telegram.constants import ParseMode
@@ -189,7 +190,8 @@ async def logs_command(update, context: CallbackContext):
     
     try:
         # Read the entire current session log file
-        with open('bot.log', 'r', encoding='utf-8') as f:
+        log_file = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'logs', 'bot.log')
+        with open(log_file, 'r', encoding='utf-8') as f:
             lines = f.readlines()
         
         # Get last 20 lines

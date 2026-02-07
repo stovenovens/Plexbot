@@ -27,7 +27,6 @@ bot.log
 setup_git.sh
 LICENSE
 README.md
-Dockerfile
 docker-compose.yml
 .dockerignore
 data/

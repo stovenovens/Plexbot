@@ -1,6 +1,6 @@
 services:
   plexbot:
-    build: .
+    image: ghcr.io/stovenovens/plexbot:latest
     container_name: plexbot
     restart: unless-stopped
     network_mode: host

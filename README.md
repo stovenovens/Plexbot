@@ -76,13 +76,25 @@ The bot includes a Searcharr-like request system that allows anyone in the group
 
 ### Quick Start
 
-```bash
-git clone https://github.com/stovenovens/Plexbot.git
-cd Plexbot
-cp .env.example .env
-# Edit .env with your settings
-docker compose up -d
-```
+1. Create a directory and download the compose file:
+   ```bash
+   mkdir plexbot && cd plexbot
+   curl -O https://raw.githubusercontent.com/stovenovens/Plexbot/main/docker-compose.yml
+   curl -O https://raw.githubusercontent.com/stovenovens/Plexbot/main/.env.example
+   cp .env.example .env
+   ```
+
+2. Edit `.env` with your settings:
+   ```bash
+   nano .env
+   ```
+
+3. Start the bot:
+   ```bash
+   docker compose up -d
+   ```
+
+The image is automatically built for both `amd64` and `arm64` (Raspberry Pi), so it works on any platform.
 
 ### Managing the Bot
 
@@ -96,13 +108,13 @@ docker compose down
 # Restart after config changes
 docker compose restart
 
-# Rebuild after code updates
-docker compose up -d --build
+# Update to latest version
+docker compose pull && docker compose up -d
 ```
 
 ### Data Persistence
 
-Request tracking data is stored in the `data/` directory, which is mounted as a volume. Your data persists across container restarts and rebuilds.
+Request tracking data is stored in the `data/` directory, which is mounted as a volume. Your data persists across container restarts and updates.
 
 ### Wake-on-LAN Note
 

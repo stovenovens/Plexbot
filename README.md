@@ -74,29 +74,39 @@ The bot includes a Searcharr-like request system that allows anyone in the group
 
 ## Configuration
 
-### Required for Basic Functionality
+### Required
 - `BOT_TOKEN` - Your Telegram bot token
 - `GROUP_CHAT_ID` - Your Telegram group chat ID
+- `BOT_TOPIC_ID` - Dedicated bot topic ID (default: 15980)
 - `TAUTILLI_URL` and `TAUTILLI_API_KEY` - For Plex monitoring
 - `TMDB_API_READ_TOKEN` - For movie/TV search and trending content
 
-### Required for Request System
+### Request System
 - `RADARR_URL` and `RADARR_API_KEY` - For movie requests
 - `SONARR_URL` and `SONARR_API_KEY` - For TV series requests
 
-### Optional Features
+### Wake-on-LAN & Server Control
 - `PLEX_SERVER_MAC` and `PLEX_BROADCAST_IP` - For Wake-on-LAN
 - `PLEX_SERVER_IP`, `PLEX_SSH_USER`, `PLEX_SSH_PASSWORD` - For remote shutdown
-- `AUTO_SHUTDOWN_ENABLED`, `AUTO_SHUTDOWN_HOUR`, `AUTO_SHUTDOWN_MINUTE` - For automatic shutdown
-- `AUTO_SHUTDOWN_RECHECK_MINUTES` - Minutes to wait before rechecking for active streams
+- `OFF_USER_IDS` - Comma-separated Telegram user IDs allowed to run `/off` and admin commands
+
+### Schedule Settings
+- `WEEKDAY_WAKE_HOUR`, `WEEKDAY_WAKE_MINUTE` - Auto-wake time on weekdays (default: 17:30)
+- `WEEKEND_WAKE_HOUR`, `WEEKEND_WAKE_MINUTE` - Auto-wake time on weekends (default: 18:00)
+- `AUTO_SHUTDOWN_ENABLED` - Enable automatic shutdown (default: false)
+- `AUTO_SHUTDOWN_HOUR`, `AUTO_SHUTDOWN_MINUTE` - Shutdown time (default: 1:00 AM)
+- `AUTO_SHUTDOWN_RECHECK_MINUTES` - Minutes to wait before rechecking for active streams (default: 30)
+
+### Notifications
+- `SILENT_NOTIFICATIONS` - Disable notification sounds (default: true)
 
 See `.env.example` for all available configuration options.
 
 ## Automated Features
 
 ### Auto-Wake
-- **Auto-wake weekdays:** 4:30 PM (configurable)
-- **Auto-wake weekends:** 10:00 AM (configurable)
+- **Auto-wake weekdays:** 5:30 PM (configurable)
+- **Auto-wake weekends:** 6:00 PM (configurable)
 - **Smart server detection** - Skips wake if already online
 - **30-minute grace period** - For missed schedules
 
@@ -157,24 +167,29 @@ The request system is designed for trusted group environments:
 ## File Structure
 
 ```
-plex_bot/
-├── main.py                    # Main bot entry point
-├── config.py                  # Configuration and environment variables
-├── requirements.txt           # Python dependencies
-├── .env                      # Your configuration (create from .env.example)
-├── .env.example              # Configuration template
+Plexbot/
+├── main.py                          # Main bot entry point
+├── config.py                        # Configuration and environment variables
+├── requirements.txt                 # Python dependencies
+├── .env                             # Your configuration (create from .env.example)
+├── .env.example                     # Configuration template
 ├── commands/
 │   ├── __init__.py
-│   ├── admin_commands.py     # Debug, logs, info commands
-│   ├── media_commands.py     # Now playing, stats, trending, upcoming
-│   ├── server_commands.py    # Wake, shutdown, status commands
-│   ├── request_commands.py   # Movie/TV search and request system
-│   └── request_callbacks.py  # Interactive button handlers
-└── utils/
-    ├── __init__.py
-    ├── helpers.py            # Shared utility functions
-    ├── logging_setup.py      # Session-based logging
-    └── server_status.py      # Server monitoring and wake functions
+│   ├── admin_commands.py            # Debug, logs, info, welcome commands
+│   ├── media_commands.py            # Now playing, stats, trending, upcoming, search
+│   ├── server_commands.py           # Wake, shutdown, status commands
+│   ├── request_commands.py          # Movie/TV search and request system
+│   ├── request_callbacks.py         # Interactive button handlers
+│   └── request_status_commands.py   # /myrequests command
+├── utils/
+│   ├── __init__.py
+│   ├── helpers.py                   # Shared utility functions
+│   ├── logging_setup.py             # Session-based logging
+│   ├── server_status.py             # Server monitoring and wake functions
+│   ├── request_tracker.py           # Request persistence and status tracking
+│   └── recently_added.py            # Plex content notification system
+└── data/
+    └── requests.json                # Request tracking database
 ```
 
 ## Contributing

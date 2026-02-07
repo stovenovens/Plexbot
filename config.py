@@ -53,7 +53,7 @@ RADARR_API_KEY = os.getenv("RADARR_API_KEY", "")
 # --- Hardware Configuration ---
 # Wake-on-LAN
 PLEX_MAC = os.getenv("PLEX_SERVER_MAC", "")
-PLEX_BROADCAST_IP = os.getenv("PLEX_SERVER_BROADCAST", "192.168.1.255")
+PLEX_BROADCAST_IP = os.getenv("PLEX_BROADCAST_IP", "192.168.1.255")
 
 # SSH shutdown config
 PLEX_SSH_USER = os.getenv("PLEX_SSH_USER", "")

@@ -128,6 +128,9 @@ The Docker setup uses `network_mode: host` so that Wake-on-LAN broadcast packets
 - `PLEX_SERVER_IP`, `PLEX_SSH_USER`, `PLEX_SSH_PASSWORD` - For remote shutdown
 - `OFF_USER_IDS` - Comma-separated Telegram user IDs allowed to run `/off` and admin commands
 
+### Timezone
+- `TIMEZONE` - IANA timezone for schedules and timestamps (default: `Australia/Melbourne`). See [list of timezones](https://en.wikipedia.org/wiki/List_of_tz_database_time_zones)
+
 ### Schedule Settings
 - `WEEKDAY_WAKE_HOUR`, `WEEKDAY_WAKE_MINUTE` - Auto-wake time on weekdays (default: 17:30)
 - `WEEKEND_WAKE_HOUR`, `WEEKEND_WAKE_MINUTE` - Auto-wake time on weekends (default: 18:00)

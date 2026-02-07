@@ -62,8 +62,13 @@ PLEX_SERVER_IP = os.getenv("PLEX_SERVER_IP", "")
 PLEX_SSH_PASSWORD = os.getenv("PLEX_SSH_PASSWORD", None)
 
 # --- Other Settings ---
-# Timezone
-MELBOURNE_TZ = ZoneInfo("Australia/Melbourne")
+# Timezone (configurable via TIMEZONE env var, defaults to Australia/Melbourne)
+TIMEZONE = os.getenv("TIMEZONE", "Australia/Melbourne")
+try:
+    MELBOURNE_TZ = ZoneInfo(TIMEZONE)
+except Exception:
+    logger.error("Invalid timezone '%s'. Use a valid IANA timezone (e.g. America/New_York, Europe/London).", TIMEZONE)
+    exit(1)
 
 # --- Validation ---
 # Validate required vars
@@ -77,6 +82,7 @@ if not PLEX_MAC or not PLEX_BROADCAST_IP:
 
 # Log configuration
 logger.info("📱 Bot topic ID: %s", BOT_TOPIC_ID if BOT_TOPIC_ID else "Not configured (responding in all chats)")
+logger.info("🌏 Timezone: %s", TIMEZONE)
 logger.info("🔇 Silent notifications: %s", SILENT_NOTIFICATIONS)
 logger.info("⏰ Auto-wake schedule - Weekdays: %02d:%02d, Weekends: %02d:%02d", 
             WEEKDAY_WAKE_HOUR, WEEKDAY_WAKE_MINUTE, WEEKEND_WAKE_HOUR, WEEKEND_WAKE_MINUTE)

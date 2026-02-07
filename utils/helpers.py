@@ -16,6 +16,10 @@ def is_bot_topic(update) -> bool:
     if not update.message:
         return False
 
+    # If no topic configured, allow all messages
+    if BOT_TOPIC_ID is None:
+        return True
+
     # Check if message has message_thread_id (topic ID)
     if hasattr(update.message, 'message_thread_id'):
         thread_id = update.message.message_thread_id

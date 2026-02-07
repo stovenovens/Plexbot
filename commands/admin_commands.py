@@ -31,7 +31,7 @@ async def debug_command(update, context: CallbackContext):
         msg += f"\\- Plex MAC: {escape_md(PLEX_MAC)}\n"
         msg += f"\\- Broadcast IP: {escape_md(PLEX_BROADCAST_IP)}\n"
         msg += f"\\- Group Chat ID: {escape_md(str(GROUP_CHAT_ID))}\n"
-        msg += f"\\- Bot Topic ID: {escape_md(str(BOT_TOPIC_ID))}\n"
+        msg += f"\\- Bot Topic ID: {escape_md(str(BOT_TOPIC_ID)) if BOT_TOPIC_ID else 'Not configured'}\n"
         msg += f"\\- Weekday wake: {WEEKDAY_WAKE_HOUR:02d}:{WEEKDAY_WAKE_MINUTE:02d}\n"
         msg += f"\\- Weekend wake: {WEEKEND_WAKE_HOUR:02d}:{WEEKEND_WAKE_MINUTE:02d}\n"
         msg += f"\\- Tautulli URL: {escape_md(TAUTILLI_URL[:50] + '...' if len(TAUTILLI_URL) > 50 else TAUTILLI_URL)}\n"

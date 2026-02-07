@@ -60,8 +60,8 @@ async def scheduled_wake(bot: Bot):
     logger.info("⏰ Auto-wake job triggered at %s (Melbourne time)", melbourne_time.strftime('%Y-%m-%d %H:%M:%S %Z'))
     
     # Log system status
-    logger.info("🔍 Pre-wake check - MAC: %s, Broadcast: %s, Topic ID: %s", 
-                PLEX_MAC, PLEX_BROADCAST_IP, BOT_TOPIC_ID)
+    logger.info("🔍 Pre-wake check - MAC: %s, Broadcast: %s, Topic ID: %s",
+                PLEX_MAC, PLEX_BROADCAST_IP, BOT_TOPIC_ID if BOT_TOPIC_ID else "Not configured")
     
     try:
         # Check if server is actually running

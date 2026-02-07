@@ -17,7 +17,8 @@ logger = logging.getLogger(__name__)
 # --- Telegram Configuration ---
 BOT_TOKEN = os.getenv("BOT_TOKEN", "")
 GROUP_CHAT_ID = int(os.getenv("GROUP_CHAT_ID", "0"))
-BOT_TOPIC_ID = int(os.getenv("BOT_TOPIC_ID", "15980"))  # Dedicated bot topic
+_bot_topic_raw = os.getenv("BOT_TOPIC_ID", "")
+BOT_TOPIC_ID = int(_bot_topic_raw) if _bot_topic_raw.strip() else None  # Optional: dedicated bot topic
 
 # Silent notifications setting (True = silent, False = with sound)
 SILENT_NOTIFICATIONS = os.getenv("SILENT_NOTIFICATIONS", "true").lower() == "true"
@@ -75,7 +76,7 @@ if not PLEX_MAC or not PLEX_BROADCAST_IP:
     logger.warning("⚠️ Wake-on-LAN not configured properly")
 
 # Log configuration
-logger.info("📱 Bot topic ID configured: %s", BOT_TOPIC_ID)
+logger.info("📱 Bot topic ID: %s", BOT_TOPIC_ID if BOT_TOPIC_ID else "Not configured (responding in all chats)")
 logger.info("🔇 Silent notifications: %s", SILENT_NOTIFICATIONS)
 logger.info("⏰ Auto-wake schedule - Weekdays: %02d:%02d, Weekends: %02d:%02d", 
             WEEKDAY_WAKE_HOUR, WEEKDAY_WAKE_MINUTE, WEEKEND_WAKE_HOUR, WEEKEND_WAKE_MINUTE)

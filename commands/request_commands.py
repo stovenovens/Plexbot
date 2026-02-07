@@ -604,7 +604,7 @@ async def send_command_response_with_markup(update, context: CallbackContext, me
             )
         
         # If command was issued outside bot topic, send a redirect message
-        if update.message and update.message.message_thread_id != BOT_TOPIC_ID:
+        if BOT_TOPIC_ID and update.message and update.message.message_thread_id != BOT_TOPIC_ID:
             redirect_msg = f"👀 Response sent to bot topic"
             await update.message.reply_text(redirect_msg, disable_notification=SILENT_NOTIFICATIONS)
             

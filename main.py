@@ -155,13 +155,15 @@ def main():
     # Register global error handler for graceful error handling
     app.add_error_handler(error_handler)
 
-    # Create a filter to only accept commands from the bot topic
-    # This ensures commands are only processed when sent in the bot topic (ID 15980)
+    # Create a filter to only accept commands from the correct chat
     bot_topic_filter = filters.Chat(GROUP_CHAT_ID) & filters.UpdateType.MESSAGE
 
-    # Custom filter class to check message thread ID
+    # Custom filter class to check message thread ID (only active when BOT_TOPIC_ID is set)
     class BotTopicFilter(filters.MessageFilter):
         def filter(self, message):
+            # If no topic configured, allow all messages
+            if BOT_TOPIC_ID is None:
+                return True
             # Allow messages with the bot topic ID or no topic ID (for backwards compatibility)
             if hasattr(message, 'message_thread_id') and message.message_thread_id is not None:
                 is_bot_topic = message.message_thread_id == BOT_TOPIC_ID
@@ -171,7 +173,7 @@ def main():
             # If no thread_id, allow (for non-topic groups or backwards compatibility)
             return True
 
-    # Combine filters: must be in correct chat AND in bot topic
+    # Combine filters: must be in correct chat AND (optionally) in bot topic
     topic_filter = bot_topic_filter & BotTopicFilter()
 
     # Register command handlers - all restricted to bot topic

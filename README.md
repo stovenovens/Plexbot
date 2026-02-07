@@ -16,7 +16,7 @@ A comprehensive Telegram bot for managing and monitoring a Plex media server wit
 
 ## Commands
 
-**Note:** All commands must be sent in the bot topic (ID 15980). Commands sent in other topics will be silently ignored.
+**Note:** If `BOT_TOPIC_ID` is configured, all commands must be sent in that topic. Commands sent in other topics will be silently ignored. If not configured, the bot responds in any chat/topic.
 
 ### Request Commands
 - `/movie <title>` - Search for movies to request
@@ -77,9 +77,11 @@ The bot includes a Searcharr-like request system that allows anyone in the group
 ### Required
 - `BOT_TOKEN` - Your Telegram bot token
 - `GROUP_CHAT_ID` - Your Telegram group chat ID
-- `BOT_TOPIC_ID` - Dedicated bot topic ID (default: 15980)
 - `TAUTILLI_URL` and `TAUTILLI_API_KEY` - For Plex monitoring
 - `TMDB_API_READ_TOKEN` - For movie/TV search and trending content
+
+### Bot Topic (Optional)
+- `BOT_TOPIC_ID` - Restrict the bot to a specific Telegram topic. If not set, the bot responds in any chat/topic
 
 ### Request System
 - `RADARR_URL` and `RADARR_API_KEY` - For movie requests

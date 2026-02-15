@@ -21,14 +21,21 @@ from utils.server_status import check_server_status
 logger = logging.getLogger(__name__)
 
 async def on_command(update, context: CallbackContext):
-    """Manual wake-on-LAN command"""
+    """Manual wake-on-LAN command - checks status first"""
     try:
+        is_online, status_message = await check_server_status()
+
+        if is_online:
+            logger.info("✅ Server already online - skipping WOL")
+            await send_command_response(update, context, "✅ Server is already online\\!", parse_mode=ParseMode.MARKDOWN_V2)
+            return
+
         send_magic_packet(PLEX_MAC, ip_address=PLEX_BROADCAST_IP)
         logger.info("✅ Manual WOL packet sent to %s via %s", PLEX_MAC, PLEX_BROADCAST_IP)
-        await send_command_response(update, context, "🔌 Sent Wake-on-LAN packet.")
+        await send_command_response(update, context, "🔌 Server is currently offline \\- sending wake command\\!", parse_mode=ParseMode.MARKDOWN_V2)
     except Exception as e:
         logger.error("❌ Manual WOL failed: %s", e)
-        await send_command_response(update, context, f"❌ Wake-on-LAN failed: {str(e)}")
+        await send_command_response(update, context, f"❌ Wake\\-on\\-LAN failed: {escape_md(str(e))}", parse_mode=ParseMode.MARKDOWN_V2)
 
 async def off_command(update, context: CallbackContext):
     """Shutdown server command (authorized users only)"""

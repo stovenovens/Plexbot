@@ -137,6 +137,8 @@ async def handle_request_callback(update, context: CallbackContext):
                 await query.edit_message_caption(caption=config_text, parse_mode=ParseMode.MARKDOWN_V2)
             else:
                 await query.edit_message_text(config_text, parse_mode=ParseMode.MARKDOWN_V2)
+        elif callback_data.startswith("select_season_"):
+            await handle_season_selection(query, callback_data)
         elif callback_data.startswith("select_root_"):
             await handle_root_folder_selection(query, callback_data)
         elif callback_data.startswith("select_quality_"):
@@ -548,35 +550,12 @@ async def handle_add_tv(query, callback_data):
         "root_folders": root_folders,
         "quality_profiles": quality_profiles
     }
-    
+
     # Store in active searches for callback access
     request_manager.active_searches[f"add_tv_{search_id}"] = show_data
-    
-    # If only one root folder and one quality profile, add directly
-    if len(root_folders) == 1 and len(quality_profiles) == 1:
-        root_folder = root_folders[0]
-        quality_profile = quality_profiles[0]
 
-        success, error, sonarr_id = await add_tv_to_sonarr(show, root_folder, quality_profile, user_id, username)
-        if success:
-            title = show.get("name", "Unknown")
-            success_text = await build_tv_success_message(show, title, sonarr_id, request_tracker)
-            if query.message.photo:
-                await query.edit_message_caption(caption=success_text, parse_mode=ParseMode.MARKDOWN_V2)
-            else:
-                await query.edit_message_text(success_text, parse_mode=ParseMode.MARKDOWN_V2)
-            # Clean up
-            request_manager.active_searches.pop(search_id, None)
-            request_manager.active_searches.pop(f"add_tv_{search_id}", None)
-        else:
-            error_text = f"❌ Failed to add series: {escape_md(error)}"
-            if query.message.photo:
-                await query.edit_message_caption(caption=error_text, parse_mode=ParseMode.MARKDOWN_V2)
-            else:
-                await query.edit_message_text(error_text, parse_mode=ParseMode.MARKDOWN_V2)
-    else:
-        # Show root folder selection
-        await show_root_folder_selection(query, show_data, "tv")
+    # Show season selection prompt before proceeding
+    await show_season_selection(query, show_data)
 
 async def handle_cancel_search(query, callback_data):
     """Handle search cancellation"""
@@ -608,6 +587,104 @@ async def handle_cancel_search(query, callback_data):
     except Exception as e:
         # Message may have already been edited or deleted
         logger.warning("⚠️ Could not update message for cancelled search %s: %s", search_id, e)
+
+async def show_season_selection(query, show_data):
+    """Show season monitoring selection for TV series"""
+    show = show_data["show"]
+    search_id = show_data["search_id"]
+    title = show.get("name", "Unknown")
+
+    msg = f"📺 *How much of {escape_md(title)} would you like\\?*"
+
+    keyboard = [
+        [InlineKeyboardButton("📦 All Seasons", callback_data=f"select_season_all_{search_id}")],
+        [InlineKeyboardButton("📺 Latest Season", callback_data=f"select_season_latest_{search_id}")],
+        [InlineKeyboardButton("🔢 Season 1", callback_data=f"select_season_first_{search_id}")],
+        [InlineKeyboardButton("❌ Cancel", callback_data=f"cancel_search_{search_id}")]
+    ]
+
+    if query.message.photo:
+        await query.edit_message_caption(
+            caption=msg,
+            parse_mode=ParseMode.MARKDOWN_V2,
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+    else:
+        await query.edit_message_text(
+            msg,
+            parse_mode=ParseMode.MARKDOWN_V2,
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+
+
+async def handle_season_selection(query, callback_data):
+    """Handle season monitoring selection and proceed to add TV series"""
+    from utils.request_tracker import request_tracker
+
+    # Parse: select_season_{option}_{search_id}
+    parts = callback_data.split("_")
+    if len(parts) < 4:
+        return
+
+    # option is parts[2], search_id is the rest
+    option = parts[2]  # "all", "latest", or "first"
+    search_id = "_".join(parts[3:])
+
+    # Map to Sonarr monitor options
+    monitor_map = {
+        "all": "all",
+        "latest": "latestSeason",
+        "first": "firstSeason"
+    }
+    monitor_option = monitor_map.get(option, "latestSeason")
+
+    # Get show data
+    show_data = request_manager.active_searches.get(f"add_tv_{search_id}")
+    if not show_data:
+        await query.edit_message_text("❌ Session expired\\. Please search again\\.", parse_mode=ParseMode.MARKDOWN_V2)
+        return
+
+    # Store the selected monitor option
+    show_data["monitor_option"] = monitor_option
+
+    show = show_data["show"]
+    root_folders = show_data["root_folders"]
+    quality_profiles = show_data["quality_profiles"]
+
+    user_id = query.from_user.id
+    username = query.from_user.username or query.from_user.first_name
+
+    # If only one root folder and one quality profile, add directly
+    if len(root_folders) == 1 and len(quality_profiles) == 1:
+        root_folder = root_folders[0]
+        quality_profile = quality_profiles[0]
+
+        if query.message.photo:
+            await query.edit_message_caption(caption="➕ Adding to library\\.\\.\\.", parse_mode=ParseMode.MARKDOWN_V2)
+        else:
+            await query.edit_message_text("➕ Adding to library\\.\\.\\.", parse_mode=ParseMode.MARKDOWN_V2)
+
+        success, error, sonarr_id = await add_tv_to_sonarr(show, root_folder, quality_profile, user_id, username, monitor_option)
+        if success:
+            title = show.get("name", "Unknown")
+            success_text = await build_tv_success_message(show, title, sonarr_id, request_tracker)
+            if query.message.photo:
+                await query.edit_message_caption(caption=success_text, parse_mode=ParseMode.MARKDOWN_V2)
+            else:
+                await query.edit_message_text(success_text, parse_mode=ParseMode.MARKDOWN_V2)
+            # Clean up
+            request_manager.active_searches.pop(search_id, None)
+            request_manager.active_searches.pop(f"add_tv_{search_id}", None)
+        else:
+            error_text = f"❌ Failed to add series: {escape_md(error)}"
+            if query.message.photo:
+                await query.edit_message_caption(caption=error_text, parse_mode=ParseMode.MARKDOWN_V2)
+            else:
+                await query.edit_message_text(error_text, parse_mode=ParseMode.MARKDOWN_V2)
+    else:
+        # Show root folder selection
+        await show_root_folder_selection(query, show_data, "tv")
+
 
 async def show_root_folder_selection(query, media_data, media_type):
     """Show root folder selection keyboard"""
@@ -756,7 +833,8 @@ async def handle_quality_profile_selection(query, callback_data):
         title = movie.get("title", "Unknown")
     else:
         show = media_data["show"]
-        success, error, media_id = await add_tv_to_sonarr(show, root_folder, selected_profile, user_id, username)
+        monitor_option = media_data.get("monitor_option", "latestSeason")
+        success, error, media_id = await add_tv_to_sonarr(show, root_folder, selected_profile, user_id, username, monitor_option)
         title = show.get("name", "Unknown")
 
     if success:
@@ -865,8 +943,8 @@ async def add_movie_to_radarr(movie, root_folder, quality_profile, user_id=None,
         logger.error("❌ Failed to add movie to Radarr: %s", e)
         return False, str(e), None
 
-async def add_tv_to_sonarr(show, root_folder, quality_profile, user_id=None, username=None):
-    """Add TV series to Sonarr with only latest season monitored and track the request"""
+async def add_tv_to_sonarr(show, root_folder, quality_profile, user_id=None, username=None, monitor_option="latestSeason"):
+    """Add TV series to Sonarr with selected season monitoring and track the request"""
     if not (SONARR_URL and SONARR_API_KEY):
         return False, "Sonarr not configured", None
 
@@ -900,7 +978,7 @@ async def add_tv_to_sonarr(show, root_folder, quality_profile, user_id=None, use
             "tags": tag_ids,
             "addOptions": {
                 "searchForMissingEpisodes": True,
-                "monitor": "latestSeason"  # Only monitor latest season
+                "monitor": monitor_option
             }
         }
 
@@ -925,7 +1003,7 @@ async def add_tv_to_sonarr(show, root_folder, quality_profile, user_id=None, use
                     if resp.status_code in [200, 201]:
                         result = resp.json()
                         sonarr_id = result.get("id")
-                        logger.info("✅ Series added to Sonarr using API %s: %s (ID: %s, latest season only)", api_version, title, sonarr_id)
+                        logger.info("✅ Series added to Sonarr using API %s: %s (ID: %s, monitor: %s)", api_version, title, sonarr_id, monitor_option)
 
                         # Track the request if user info provided
                         if user_id and username and sonarr_id:

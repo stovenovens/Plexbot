@@ -374,8 +374,39 @@ async def handle_add_movie(query, callback_data):
 
     movie = search_data["results"][index]
     tmdb_id = movie.get("id")
+    title = movie.get("title", "Unknown")
+    year = None
+    if movie.get("release_date"):
+        try:
+            year = int(movie["release_date"][:4])
+        except (ValueError, IndexError):
+            pass
     user_id = query.from_user.id
     username = query.from_user.username or query.from_user.first_name
+
+    # Check if already on Plex before adding
+    on_plex, _ = await request_manager.check_exists_in_plex(title, year, "movie")
+    if on_plex:
+        msg = f"✅ *{escape_md(title)}* is already available on Plex\\!\n\n🍿 You can watch it right now\\!"
+        if query.message.photo:
+            await query.edit_message_caption(caption=msg, parse_mode=ParseMode.MARKDOWN_V2)
+        else:
+            await query.edit_message_text(msg, parse_mode=ParseMode.MARKDOWN_V2)
+        request_manager.active_searches.pop(search_id, None)
+        return
+
+    # Check if already in Radarr
+    if tmdb_id:
+        in_radarr, _ = await request_manager.check_movie_exists_in_radarr(tmdb_id)
+        if in_radarr:
+            msg = (f"✅ *{escape_md(title)}* is already in Radarr\\!\n\n"
+                   f"_It may still be downloading or processing\\._")
+            if query.message.photo:
+                await query.edit_message_caption(caption=msg, parse_mode=ParseMode.MARKDOWN_V2)
+            else:
+                await query.edit_message_text(msg, parse_mode=ParseMode.MARKDOWN_V2)
+            request_manager.active_searches.pop(search_id, None)
+            return
 
     # Check for duplicate request
     existing_request = request_tracker.find_existing_request("movie", tmdb_id)
@@ -489,8 +520,41 @@ async def handle_add_tv(query, callback_data):
 
     show = search_data["results"][index]
     tmdb_id = show.get("id")
+    name = show.get("name", "Unknown")
+    year = None
+    if show.get("first_air_date"):
+        try:
+            year = int(show["first_air_date"][:4])
+        except (ValueError, IndexError):
+            pass
     user_id = query.from_user.id
     username = query.from_user.username or query.from_user.first_name
+
+    # Check if already on Plex before adding
+    on_plex, _ = await request_manager.check_exists_in_plex(name, year, "show")
+    if on_plex:
+        msg = f"✅ *{escape_md(name)}* is already available on Plex\\!\n\n🍿 You can watch it right now\\!"
+        if query.message.photo:
+            await query.edit_message_caption(caption=msg, parse_mode=ParseMode.MARKDOWN_V2)
+        else:
+            await query.edit_message_text(msg, parse_mode=ParseMode.MARKDOWN_V2)
+        request_manager.active_searches.pop(search_id, None)
+        return
+
+    # Check if already in Sonarr
+    if tmdb_id:
+        tvdb_id = await request_manager.get_tvdb_id_from_tmdb(tmdb_id)
+        if tvdb_id:
+            in_sonarr, _ = await request_manager.check_series_exists_in_sonarr(tvdb_id)
+            if in_sonarr:
+                msg = (f"✅ *{escape_md(name)}* is already in Sonarr\\!\n\n"
+                       f"_It may still be downloading or processing\\._")
+                if query.message.photo:
+                    await query.edit_message_caption(caption=msg, parse_mode=ParseMode.MARKDOWN_V2)
+                else:
+                    await query.edit_message_text(msg, parse_mode=ParseMode.MARKDOWN_V2)
+                request_manager.active_searches.pop(search_id, None)
+                return
 
     # Check for duplicate request
     existing_request = request_tracker.find_existing_request("tv", tmdb_id)

@@ -10,9 +10,12 @@ A comprehensive Telegram bot for managing and monitoring a Plex media server wit
 - 📊 **Statistics** - Weekly viewing stats and leaderboards  
 - 📅 **Upcoming Releases** - TV episodes and movies from Sonarr/Radarr
 - 🔥 **Trending Content** - Hot movies and shows from TMDB
-- 🔌 **Server Control** - Wake-on-LAN and remote shutdown
-- ⏰ **Scheduled Wake** - Automatic server wake at configured times
+- 🔌 **Server Control** - Wake-on-LAN and remote shutdown with smart status detection
+- ⏰ **Scheduled Wake** - Automatic server wake at configured times (timezone-aware)
 - 🎬 **Request System** - Search and request movies/TV shows directly to Radarr/Sonarr
+- 📺 **Season Selection** - Choose between all seasons, latest season, or season 1 when requesting TV shows
+- 🔍 **Duplicate Detection** - Checks Plex library and Sonarr/Radarr before adding content
+- 📢 **Recently Added Notifications** - Automatic notifications when new content is added to Plex
 
 ## Commands
 
@@ -29,8 +32,8 @@ A comprehensive Telegram bot for managing and monitoring a Plex media server wit
 - `/upcoming` or `/up` - Show upcoming releases
 - `/hot` - Show trending content
 
-### Server Commands  
-- `/on` - Wake server with Wake-on-LAN
+### Server Commands
+- `/on` - Wake server with Wake-on-LAN (checks if already online first)
 - `/off` - Shutdown server (authorized users)
 - `/status` - Check server status
 
@@ -46,7 +49,8 @@ The bot includes a Searcharr-like request system that allows anyone in the group
 
 - **TMDB Integration** - High-quality search results with posters, ratings, and descriptions
 - **Interactive Navigation** - Browse through search results with Previous/Next buttons
-- **Smart Detection** - Automatically detects if content is already in your library
+- **Smart Detection** - Checks Plex library, Sonarr, and Radarr before adding to prevent duplicates
+- **Season Selection** - Choose to download all seasons, latest season, or start from season 1
 - **Flexible Configuration** - Supports multiple root folders and quality profiles
 - **One-Click Adding** - Add content directly to Radarr/Sonarr with minimal clicks
 - **External Links** - Quick access to TMDB and IMDb pages
@@ -56,13 +60,15 @@ The bot includes a Searcharr-like request system that allows anyone in the group
 ### Request Workflow
 
 1. User searches: `/movie Inception` or `/series Breaking Bad`
-2. Bot displays TMDB results with interactive buttons
+2. Bot displays TMDB results with posters and interactive buttons
 3. User can browse results using Previous/Next buttons
-4. Click "Add Movie/Series" to add to Radarr/Sonarr
-5. Select root folder and quality profile (if multiple configured)
-6. Content is automatically added and searched for
-7. Bot tracks download progress and notifies you when available (every 15 minutes)
-8. View all your requests with `/myrequests`
+4. Bot checks if content already exists in Plex or Sonarr/Radarr
+5. Click "Add Movie/Series" to add to Radarr/Sonarr
+6. **For TV series:** Choose between All Seasons, Latest Season, or Season 1
+7. Select root folder and quality profile (if multiple configured)
+8. Content is automatically added and searched for
+9. Bot tracks download progress and notifies you when available (every 15 minutes)
+10. View all your requests with `/myrequests`
 
 ## Setup
 
@@ -170,6 +176,11 @@ See `.env.example` for all available configuration options.
 - **Automatic retry** - Continues checking until no active streams
 - **Notifications** - Telegram alerts for all shutdown events
 
+### Recently Added Notifications
+- **Tautulli Integration** - Monitors Plex for newly added content every 5 minutes
+- **Smart Filtering** - Skips content added via user requests (they already get notified)
+- **Duplicate Prevention** - Tracks notified items to avoid repeat notifications
+
 ### Other
 - **Silent notifications** - Configurable notification sounds
 
@@ -242,7 +253,8 @@ Plexbot/
 │   ├── request_tracker.py           # Request persistence and status tracking
 │   └── recently_added.py            # Plex content notification system
 └── data/
-    └── requests.json                # Request tracking database
+    ├── requests.json                # Request tracking database
+    └── notified_items.json          # Recently added notification tracking
 ```
 
 ## Contributing
@@ -266,6 +278,14 @@ If you find this bot useful, consider supporting development:
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
 ## Changelog
+
+### v2.1 - Smart Detection & Season Selection
+- Added season selection for TV requests (All Seasons, Latest Season, Season 1)
+- Added Plex library duplicate detection before adding to Sonarr/Radarr
+- Fixed Tautulli search response parsing for library checks
+- `/on` command now checks if server is already online before sending WOL
+- Fixed timezone handling for scheduled wake/shutdown jobs (explicit timezone on CronTrigger)
+- Added recently added content notifications via Tautulli
 
 ### v2.0 - Request System Integration
 - Added movie and TV series request functionality

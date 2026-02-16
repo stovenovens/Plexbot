@@ -318,20 +318,21 @@ class RequestManager:
                 resp = await client.get(search_url, params=params)
 
                 if resp.status_code != 200:
-                    logger.debug("Tautulli search returned %d", resp.status_code)
+                    logger.info("🔍 Plex check: Tautulli search returned %d", resp.status_code)
                     return False, None
 
                 result = resp.json()
 
                 if result.get("response", {}).get("result") != "success":
-                    logger.debug("Tautulli search not successful")
+                    logger.info("🔍 Plex check: Tautulli search not successful")
                     return False, None
 
                 # Get search results - handle various response structures
                 data = result.get("response", {}).get("data", {})
 
-                # Debug log the structure
-                logger.debug("Tautulli search response data type: %s", type(data))
+                logger.info("🔍 Plex check: Searching for '%s' (%s) - response data type: %s, keys: %s",
+                           title, media_type, type(data).__name__,
+                           list(data.keys()) if isinstance(data, dict) else "N/A")
 
                 # Handle different Tautulli response formats
                 search_results = []
@@ -345,6 +346,8 @@ class RequestManager:
                     # Sometimes data is the results list directly
                     search_results = data
 
+                logger.info("🔍 Plex check: Found %d search results for '%s'", len(search_results), title)
+
                 if not search_results:
                     return False, None
 
@@ -354,12 +357,15 @@ class RequestManager:
                 for item in search_results:
                     # Skip if item is not a dictionary (could be string in some responses)
                     if not isinstance(item, dict):
-                        logger.debug("Skipping non-dict search result item: %s", type(item))
+                        logger.info("🔍 Plex check: Skipping non-dict result: %s", type(item))
                         continue
 
                     item_title = item.get("title", "").lower().strip()
                     item_year = item.get("year")
                     item_media_type = item.get("media_type", "").lower()
+
+                    logger.info("🔍 Plex check: Comparing - search='%s' (%s) vs result='%s' (%s, type=%s)",
+                               title.lower().strip(), media_type, item_title, item_year, item_media_type)
 
                     # Map Tautulli media types to our types
                     # Tautulli uses: movie, show, season, episode, artist, album, track
@@ -398,6 +404,7 @@ class RequestManager:
                                 logger.info("✅ Found '%s' in Plex library (exact title match)", item.get("title"))
                                 return True, item
 
+                logger.info("🔍 Plex check: No match found for '%s' in %d results", title, len(search_results))
                 return False, None
 
         except Exception as e:

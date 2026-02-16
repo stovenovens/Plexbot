@@ -334,17 +334,29 @@ class RequestManager:
                            title, media_type, type(data).__name__,
                            list(data.keys()) if isinstance(data, dict) else "N/A")
 
-                # Handle different Tautulli response formats
+                # Handle Tautulli search response format
+                # results_list is a dict keyed by media type: {"movie": [...], "show": [...], "episode": [...]}
                 search_results = []
                 if isinstance(data, dict):
-                    # Standard format: {"results_list": [...]}
-                    search_results = data.get("results_list", [])
-                    # Alternative format: results directly in data
-                    if not search_results and "results" in data:
-                        search_results = data.get("results", [])
+                    results_list = data.get("results_list", {})
+
+                    if isinstance(results_list, dict):
+                        # Tautulli format: {"movie": [...], "show": [...], "episode": [...], ...}
+                        # Flatten all media type lists into one list, tagging each item with its type
+                        for result_type, items in results_list.items():
+                            if isinstance(items, list):
+                                for item in items:
+                                    if isinstance(item, dict):
+                                        # Ensure media_type is set from the key if not present
+                                        if "media_type" not in item:
+                                            item["media_type"] = result_type
+                                        search_results.append(item)
+                    elif isinstance(results_list, list):
+                        # Fallback: results_list is a flat list
+                        search_results = [r for r in results_list if isinstance(r, dict)]
+
                 elif isinstance(data, list):
-                    # Sometimes data is the results list directly
-                    search_results = data
+                    search_results = [r for r in data if isinstance(r, dict)]
 
                 logger.info("🔍 Plex check: Found %d search results for '%s'", len(search_results), title)
 

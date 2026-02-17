@@ -61,6 +61,10 @@ PLEX_SSH_USER = os.getenv("PLEX_SSH_USER", "")
 PLEX_SERVER_IP = os.getenv("PLEX_SERVER_IP", "")
 PLEX_SSH_PASSWORD = os.getenv("PLEX_SSH_PASSWORD", None)
 
+# Remote access check config
+PLEX_PUBLIC_IP = os.getenv("PLEX_PUBLIC_IP", "")
+PLEX_EXTERNAL_PORT = int(os.getenv("PLEX_EXTERNAL_PORT", "32400"))
+
 # --- Other Settings ---
 # Timezone (configurable via TIMEZONE env var, defaults to Australia/Melbourne)
 TIMEZONE = os.getenv("TIMEZONE", "Australia/Melbourne")

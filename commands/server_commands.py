@@ -11,9 +11,12 @@ from telegram.ext import CallbackContext
 from telegram.constants import ParseMode
 from wakeonlan import send_magic_packet
 
+from httpx import AsyncClient
+
 from config import (
-    OFF_USER_IDS, PLEX_MAC, PLEX_BROADCAST_IP, 
-    PLEX_SERVER_IP, PLEX_SSH_USER, PLEX_SSH_PASSWORD
+    OFF_USER_IDS, PLEX_MAC, PLEX_BROADCAST_IP,
+    PLEX_SERVER_IP, PLEX_SSH_USER, PLEX_SSH_PASSWORD,
+    PLEX_PUBLIC_IP, PLEX_EXTERNAL_PORT
 )
 from utils.helpers import send_command_response, escape_md
 from utils.server_status import check_server_status
@@ -136,3 +139,67 @@ async def check_status_command(update, context: CallbackContext):
     except Exception as e:
         logger.error("❌ Status check command failed: %s", e)
         await send_command_response(update, context, f"❌ Status check failed: {escape_md(str(e))}", parse_mode=ParseMode.MARKDOWN_V2)
+
+
+async def remote_check_command(update, context: CallbackContext):
+    """Check if Plex server is accessible to external/remote users"""
+    if not PLEX_PUBLIC_IP:
+        await send_command_response(update, context, "❌ Remote check not configured\\. Set `PLEX_PUBLIC_IP` in \\.env\\.", parse_mode=ParseMode.MARKDOWN_V2)
+        return
+
+    try:
+        await send_command_response(update, context, "🌐 Checking remote access\\.\\.\\.", parse_mode=ParseMode.MARKDOWN_V2)
+
+        # First check if server is online locally
+        is_online, local_status = await check_server_status()
+
+        if not is_online:
+            msg = (
+                "❌ *Remote Access: UNAVAILABLE*\n\n"
+                "The server is currently offline\\.\n"
+                "Use `/on` to wake the server first\\."
+            )
+            await send_command_response(update, context, msg, parse_mode=ParseMode.MARKDOWN_V2)
+            return
+
+        # Check external access via public IP and port
+        external_url = f"http://{PLEX_PUBLIC_IP}:{PLEX_EXTERNAL_PORT}/identity"
+        remote_accessible = False
+        remote_error = None
+
+        try:
+            async with AsyncClient(timeout=10.0) as client:
+                resp = await client.get(external_url)
+                if resp.status_code == 200:
+                    remote_accessible = True
+                else:
+                    remote_error = f"HTTP {resp.status_code}"
+        except Exception as e:
+            remote_error = str(e)
+
+        if remote_accessible:
+            msg = (
+                "✅ *Remote Access: AVAILABLE*\n\n"
+                "🏠 Local: Online\n"
+                f"🌐 External: Accessible on port {PLEX_EXTERNAL_PORT}\n\n"
+                "Outside users can connect to Plex\\!"
+            )
+            logger.info("✅ Remote access check passed - %s:%s is accessible", PLEX_PUBLIC_IP, PLEX_EXTERNAL_PORT)
+        else:
+            msg = (
+                "⚠️ *Remote Access: BLOCKED*\n\n"
+                "🏠 Local: Online\n"
+                f"🌐 External: Not reachable on port {PLEX_EXTERNAL_PORT}\n\n"
+                "Outside users *cannot* connect\\. Possible causes:\n"
+                "• Port forwarding not configured on router\n"
+                "• Firewall blocking the port\n"
+                "• ISP blocking incoming connections\n"
+                "• Plex remote access disabled in settings"
+            )
+            logger.warning("⚠️ Remote access check failed - %s:%s - %s", PLEX_PUBLIC_IP, PLEX_EXTERNAL_PORT, remote_error)
+
+        await send_command_response(update, context, msg, parse_mode=ParseMode.MARKDOWN_V2)
+
+    except Exception as e:
+        logger.error("❌ Remote check failed: %s", e)
+        await send_command_response(update, context, f"❌ Remote check failed: {escape_md(str(e))}", parse_mode=ParseMode.MARKDOWN_V2)

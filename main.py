@@ -17,7 +17,7 @@ from config import *
 from utils.logging_setup import setup_logging
 from utils.server_status import scheduled_wake, scheduled_shutdown
 from commands.media_commands import nowplaying_command, upcoming_command, hot_command, stats_command, queue_command, search_plex_command
-from commands.server_commands import on_command, off_command, check_status_command
+from commands.server_commands import on_command, off_command, check_status_command, remote_check_command
 from commands.admin_commands import (
     debug_command, logs_command, testwake_command, info_command, welcome_command,
     requests_admin_command, clearrequest_command, clearrequests_command
@@ -181,6 +181,7 @@ def main():
     app.add_handler(CommandHandler("on", on_command, filters=topic_filter))
     app.add_handler(CommandHandler("off", off_command, filters=topic_filter))
     app.add_handler(CommandHandler("status", check_status_command, filters=topic_filter))
+    app.add_handler(CommandHandler("remotecheck", remote_check_command, filters=topic_filter))
 
     # Media commands
     app.add_handler(CommandHandler("nowplaying", nowplaying_command, filters=topic_filter))

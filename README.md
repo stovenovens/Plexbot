@@ -15,6 +15,7 @@ A comprehensive Telegram bot for managing and monitoring a Plex media server wit
 - 🎬 **Request System** - Search and request movies/TV shows directly to Radarr/Sonarr
 - 📺 **Season Selection** - Choose between all seasons, latest season, or season 1 when requesting TV shows
 - 🔍 **Duplicate Detection** - Checks Plex library and Sonarr/Radarr before adding content
+- 🌐 **Remote Access Check** - Verify if Plex is accessible to outside users
 - 📢 **Recently Added Notifications** - Automatic notifications when new content is added to Plex
 
 ## Commands
@@ -36,6 +37,7 @@ A comprehensive Telegram bot for managing and monitoring a Plex media server wit
 - `/on` - Wake server with Wake-on-LAN (checks if already online first)
 - `/off` - Shutdown server (authorized users)
 - `/status` - Check server status
+- `/remotecheck` - Check if Plex is accessible to outside users
 
 ### Admin Commands
 - `/debug` - Show bot configuration
@@ -145,6 +147,10 @@ The Docker setup uses `network_mode: host` so that Wake-on-LAN broadcast packets
 - `PLEX_SERVER_MAC` and `PLEX_BROADCAST_IP` - For Wake-on-LAN
 - `PLEX_SERVER_IP`, `PLEX_SSH_USER`, `PLEX_SSH_PASSWORD` - For remote shutdown
 - `OFF_USER_IDS` - Comma-separated Telegram user IDs allowed to run `/off` and admin commands
+
+### Remote Access Check
+- `PLEX_PUBLIC_IP` - Your static public IP address
+- `PLEX_EXTERNAL_PORT` - Plex external port (default: 32400)
 
 ### Timezone
 - `TIMEZONE` - IANA timezone for schedules and timestamps (default: `Australia/Melbourne`). See [list of timezones](https://en.wikipedia.org/wiki/List_of_tz_database_time_zones)
@@ -282,6 +288,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 ### v2.1 - Smart Detection & Season Selection
 - Added season selection for TV requests (All Seasons, Latest Season, Season 1)
 - Added Plex library duplicate detection before adding to Sonarr/Radarr
+- Added `/remotecheck` command to verify external access for outside users
 - Fixed Tautulli search response parsing for library checks
 - `/on` command now checks if server is already online before sending WOL
 - Fixed timezone handling for scheduled wake/shutdown jobs (explicit timezone on CronTrigger)

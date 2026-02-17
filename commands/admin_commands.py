@@ -254,9 +254,10 @@ async def info_command(update, context: CallbackContext):
         msg += "\\- `/myrequests` or `/requests` \\- View your request history\n\n"
         
         msg += "*Server Commands:*\n"
-        msg += "\\- `/on` \\- Wake server\n"
+        msg += "\\- `/on` \\- Wake server \\(checks if already online\\)\n"
         msg += "\\- `/off` \\- Shutdown server \\(authorized users\\)\n"
-        msg += "\\- `/status` \\- Check server status\n\n"
+        msg += "\\- `/status` \\- Check server status\n"
+        msg += "\\- `/remotecheck` \\- Check if outside users can connect\n\n"
         
         msg += "*Media Commands:*\n"
         msg += "\\- `/nowplaying` or `/np` \\- Current streams\n"
@@ -280,7 +281,8 @@ async def info_command(update, context: CallbackContext):
         msg += "\\- No authentication required for group members\n"
         msg += "\\- TMDB search with interactive navigation\n"
         msg += "\\- Automatic Radarr/Sonarr integration\n"
-        msg += "\\- Smart detection of existing content\n"
+        msg += "\\- Checks Plex library before adding duplicates\n"
+        msg += "\\- Season selection \\(All, Latest, or Season 1\\)\n"
         msg += "\\- Support for multiple root folders/quality profiles\n"
         msg += "\\- Request tracking with automatic notifications\n"
         msg += "\\- Status updates every 15 minutes\n\n"

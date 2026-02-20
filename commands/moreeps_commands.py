@@ -446,7 +446,7 @@ async def show_series_seasons(update, context_or_query, series, user_id):
 
 
 async def show_season_episodes(query, session_id, season_number):
-    """Show episodes for a specific season with monitoring status"""
+    """Show episodes for a specific season with toggle buttons for individual selection"""
     session = moreeps_sessions.get(session_id)
     if not session:
         await query.edit_message_text("❌ Session expired\\. Please try `/moreeps` again\\.",
@@ -455,6 +455,11 @@ async def show_season_episodes(query, session_id, season_number):
 
     title = session.get("title", "Unknown")
     episodes = session.get("episodes", [])
+
+    # Initialize selected episodes set if not present
+    if "selected_episodes" not in session:
+        session["selected_episodes"] = set()
+    selected = session["selected_episodes"]
 
     # Get episodes for this season
     season_episodes = [
@@ -472,30 +477,34 @@ async def show_season_episodes(query, session_id, season_number):
     # Sort by episode number
     season_episodes.sort(key=lambda e: e.get("episodeNumber", 0))
 
-    msg = f"📺 *{escape_md(title)}* \\- Season {season_number}\n\n"
-
     # Count stats
     total = len(season_episodes)
     monitored = sum(1 for ep in season_episodes if ep.get("monitored", False))
     downloaded = sum(1 for ep in season_episodes if ep.get("hasFile", False))
-    unmonitored_without_file = [
+
+    # Selectable episodes: not downloaded and not already monitored
+    selectable_eps = [
         ep for ep in season_episodes
-        if not ep.get("monitored", False) and not ep.get("hasFile", False)
+        if not ep.get("hasFile", False) and not ep.get("monitored", False)
     ]
 
+    msg = f"📺 *{escape_md(title)}* \\- Season {season_number}\n\n"
     msg += f"📊 {downloaded}/{total} downloaded \\| {monitored}/{total} monitored\n\n"
 
-    # Show episode list (compact)
+    # Show episode list with status
     for ep in season_episodes:
         ep_num = ep.get("episodeNumber", 0)
         ep_title = ep.get("title", "TBA")
         has_file = ep.get("hasFile", False)
         is_monitored = ep.get("monitored", False)
+        ep_id = ep.get("id")
 
         if has_file:
             status = "✅"
         elif is_monitored:
             status = "👁️"
+        elif ep_id in selected:
+            status = "☑️"
         else:
             status = "⬜"
 
@@ -507,16 +516,42 @@ async def show_season_episodes(query, session_id, season_number):
 
     keyboard = []
 
-    # "Monitor All Episodes" in this season
+    # Individual episode toggle buttons (only for selectable episodes)
+    if selectable_eps:
+        msg += "\n_Tap episodes to select, then monitor:_\n"
+        row = []
+        for ep in selectable_eps:
+            ep_num = ep.get("episodeNumber", 0)
+            ep_id = ep.get("id")
+            is_selected = ep_id in selected
+            icon = "☑️" if is_selected else "⬜"
+            row.append(InlineKeyboardButton(
+                f"{icon} E{ep_num:02d}",
+                callback_data=f"moreeps_eptog_{session_id}_{ep_id}"
+            ))
+            if len(row) == 4:  # 4 buttons per row
+                keyboard.append(row)
+                row = []
+        if row:
+            keyboard.append(row)
+
+    # "Monitor Selected" button (only if episodes are selected)
+    selected_in_season = [ep for ep in season_episodes if ep.get("id") in selected]
+    if selected_in_season:
+        keyboard.append([InlineKeyboardButton(
+            f"🔍 Monitor {len(selected_in_season)} Selected Episode(s)",
+            callback_data=f"moreeps_monsel_{session_id}_{season_number}"
+        )])
+
+    # Bulk actions
     keyboard.append([InlineKeyboardButton(
         "📦 Monitor All Episodes in Season",
         callback_data=f"moreeps_monall_{session_id}_{season_number}"
     )])
 
-    # "Monitor Unmonitored Episodes" (only those without files)
-    if unmonitored_without_file:
+    if selectable_eps:
         keyboard.append([InlineKeyboardButton(
-            f"➕ Monitor {len(unmonitored_without_file)} Missing Episode(s)",
+            f"➕ Monitor {len(selectable_eps)} Missing Episode(s)",
             callback_data=f"moreeps_monmissing_{session_id}_{season_number}"
         )])
 
@@ -564,6 +599,14 @@ async def handle_moreeps_callback(update, context: CallbackContext):
         elif callback_data.startswith("moreeps_monall_"):
             # Monitor all episodes in a season
             await handle_monitor_all_in_season(query, callback_data, user_id)
+
+        elif callback_data.startswith("moreeps_eptog_"):
+            # Toggle individual episode selection
+            await handle_episode_toggle(query, callback_data, user_id)
+
+        elif callback_data.startswith("moreeps_monsel_"):
+            # Monitor selected episodes
+            await handle_monitor_selected(query, callback_data, user_id)
 
         elif callback_data.startswith("moreeps_monmissing_"):
             # Monitor only missing/unmonitored episodes
@@ -853,6 +896,117 @@ async def handle_monitor_missing_in_season(query, callback_data, user_id):
     moreeps_sessions.pop(session_id, None)
 
 
+async def handle_episode_toggle(query, callback_data, user_id):
+    """Toggle an individual episode selection on/off"""
+    # Parse: moreeps_eptog_{session_id}_{episode_id}
+    parts = callback_data.split("_")
+    episode_id = int(parts[-1])
+    session_id = "_".join(parts[2:-1])
+
+    session = moreeps_sessions.get(session_id)
+    if not session:
+        await query.edit_message_text("❌ Session expired\\. Please try `/moreeps` again\\.",
+                                       parse_mode=ParseMode.MARKDOWN_V2)
+        return
+
+    if session["user_id"] != user_id:
+        await query.answer("❌ This is not your search.", show_alert=True)
+        return
+
+    # Toggle selection
+    selected = session.get("selected_episodes", set())
+    if episode_id in selected:
+        selected.discard(episode_id)
+    else:
+        selected.add(episode_id)
+    session["selected_episodes"] = selected
+
+    # Find which season this episode belongs to
+    episodes = session.get("episodes", [])
+    season_number = None
+    for ep in episodes:
+        if ep.get("id") == episode_id:
+            season_number = ep.get("seasonNumber")
+            break
+
+    if season_number is None:
+        await query.answer("❌ Episode not found.", show_alert=True)
+        return
+
+    # Refresh the season episode view
+    await show_season_episodes(query, session_id, season_number)
+
+
+async def handle_monitor_selected(query, callback_data, user_id):
+    """Monitor only the user-selected episodes"""
+    # Parse: moreeps_monsel_{session_id}_{season_number}
+    parts = callback_data.split("_")
+    season_number = int(parts[-1])
+    session_id = "_".join(parts[2:-1])
+
+    session = moreeps_sessions.get(session_id)
+    if not session:
+        await query.edit_message_text("❌ Session expired\\. Please try `/moreeps` again\\.",
+                                       parse_mode=ParseMode.MARKDOWN_V2)
+        return
+
+    if session["user_id"] != user_id:
+        await query.answer("❌ This is not your search.", show_alert=True)
+        return
+
+    title = session.get("title", "Unknown")
+    episodes = session.get("episodes", [])
+    selected = session.get("selected_episodes", set())
+
+    # Get selected episodes in this season
+    selected_eps = [
+        ep for ep in episodes
+        if ep.get("id") in selected and ep.get("seasonNumber") == season_number
+    ]
+
+    if not selected_eps:
+        await query.answer("No episodes selected! Tap episodes to select them first.", show_alert=True)
+        return
+
+    episode_ids = [ep["id"] for ep in selected_eps]
+    ep_nums = sorted([ep.get("episodeNumber", 0) for ep in selected_eps])
+    ep_list = ", ".join(f"E{n:02d}" for n in ep_nums)
+
+    await query.edit_message_text(
+        f"🔄 Monitoring selected episodes in *{escape_md(title)}* Season {season_number}\\.\\.\\.",
+        parse_mode=ParseMode.MARKDOWN_V2
+    )
+
+    # Set monitoring
+    success, error = await set_episode_monitoring(episode_ids, True)
+    if not success:
+        await query.edit_message_text(
+            f"❌ Failed to set monitoring: {escape_md(error)}",
+            parse_mode=ParseMode.MARKDOWN_V2
+        )
+        return
+
+    # Trigger search for episodes without files
+    search_ids = [ep["id"] for ep in selected_eps if not ep.get("hasFile", False)]
+
+    search_msg = ""
+    if search_ids:
+        search_success, _ = await trigger_episode_search(search_ids)
+        if search_success:
+            search_msg = f"\n🔍 Searching for {len(search_ids)} episode\\(s\\)\\.\\.\\."
+
+    await query.edit_message_text(
+        f"✅ *{escape_md(title)}* \\- Season {season_number}\n\n"
+        f"📺 Monitoring set for: {escape_md(ep_list)}"
+        f"{search_msg}\n\n"
+        f"📬 You'll be notified when episodes are available\\.",
+        parse_mode=ParseMode.MARKDOWN_V2
+    )
+
+    # Clean up
+    moreeps_sessions.pop(session_id, None)
+
+
 async def handle_back_to_seasons(query, callback_data, user_id):
     """Go back to season list"""
     # Parse: moreeps_back_{session_id}
@@ -868,6 +1022,9 @@ async def handle_back_to_seasons(query, callback_data, user_id):
     if session["user_id"] != user_id:
         await query.answer("❌ This is not your search.", show_alert=True)
         return
+
+    # Clear episode selections when going back to season list
+    session["selected_episodes"] = set()
 
     # Refresh episode data from Sonarr (in case monitoring changed)
     sonarr_id = session.get("sonarr_id")

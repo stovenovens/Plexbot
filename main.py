@@ -25,6 +25,7 @@ from commands.admin_commands import (
 from commands.request_commands import movie_command, series_command, tv_command
 from commands.request_callbacks import handle_request_callback
 from commands.request_status_commands import myrequests_command
+from commands.moreeps_commands import moreeps_command, handle_moreeps_callback
 
 # Setup logging first
 setup_logging()
@@ -199,6 +200,7 @@ def main():
     app.add_handler(CommandHandler("tv", tv_command, filters=topic_filter))  # Alias for series
     app.add_handler(CommandHandler("myrequests", myrequests_command, filters=topic_filter))
     app.add_handler(CommandHandler("requests", myrequests_command, filters=topic_filter))  # Alias
+    app.add_handler(CommandHandler("moreeps", moreeps_command, filters=topic_filter))
 
     # Admin commands
     app.add_handler(CommandHandler("debug", debug_command, filters=topic_filter))
@@ -210,7 +212,8 @@ def main():
     app.add_handler(CommandHandler("clearrequest", clearrequest_command, filters=topic_filter))
     app.add_handler(CommandHandler("clearrequests", clearrequests_command, filters=topic_filter))
 
-    # Callback query handler for request system (no filter needed, callbacks are already scoped)
+    # Callback query handlers (pattern-filtered to avoid conflicts)
+    app.add_handler(CallbackQueryHandler(handle_moreeps_callback, pattern=r"^moreeps_"))
     app.add_handler(CallbackQueryHandler(handle_request_callback))
 
     logger.info("🚀 Bot starting up...")

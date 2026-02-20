@@ -14,6 +14,7 @@ A comprehensive Telegram bot for managing and monitoring a Plex media server wit
 - ⏰ **Scheduled Wake** - Automatic server wake at configured times (timezone-aware)
 - 🎬 **Request System** - Search and request movies/TV shows directly to Radarr/Sonarr
 - 📺 **Season Selection** - Choose between all seasons, latest season, or season 1 when requesting TV shows
+- ➕ **More Episodes** - Add more seasons/episodes to shows already in Sonarr
 - 🔍 **Duplicate Detection** - Checks Plex library and Sonarr/Radarr before adding content
 - 🌐 **Remote Access Check** - Verify if Plex is accessible to outside users
 - 📢 **Recently Added Notifications** - Automatic notifications when new content is added to Plex
@@ -25,6 +26,7 @@ A comprehensive Telegram bot for managing and monitoring a Plex media server wit
 ### Request Commands
 - `/movie <title>` - Search for movies to request
 - `/series <title>` or `/tv <title>` - Search for TV series to request
+- `/moreeps <title>` - Add more episodes/seasons to shows already in Sonarr
 - `/myrequests` or `/requests` - View your request history and status
 
 ### Media Commands
@@ -53,6 +55,7 @@ The bot includes a Searcharr-like request system that allows anyone in the group
 - **Interactive Navigation** - Browse through search results with Previous/Next buttons
 - **Smart Detection** - Checks Plex library, Sonarr, and Radarr before adding to prevent duplicates
 - **Season Selection** - Choose to download all seasons, latest season, or start from season 1
+- **More Episodes** - Go back to existing shows and add more seasons or missing episodes
 - **Flexible Configuration** - Supports multiple root folders and quality profiles
 - **One-Click Adding** - Add content directly to Radarr/Sonarr with minimal clicks
 - **External Links** - Quick access to TMDB and IMDb pages
@@ -71,6 +74,7 @@ The bot includes a Searcharr-like request system that allows anyone in the group
 8. Content is automatically added and searched for
 9. Bot tracks download progress and notifies you when available (every 15 minutes)
 10. View all your requests with `/myrequests`
+11. Want more episodes later? Use `/moreeps <title>` to add more seasons or episodes
 
 ## Setup
 
@@ -250,7 +254,8 @@ Plexbot/
 │   ├── server_commands.py           # Wake, shutdown, status commands
 │   ├── request_commands.py          # Movie/TV search and request system
 │   ├── request_callbacks.py         # Interactive button handlers
-│   └── request_status_commands.py   # /myrequests command
+│   ├── request_status_commands.py   # /myrequests command
+│   └── moreeps_commands.py          # /moreeps - add more episodes to existing shows
 ├── utils/
 │   ├── __init__.py
 │   ├── helpers.py                   # Shared utility functions
@@ -284,6 +289,12 @@ If you find this bot useful, consider supporting development:
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
 ## Changelog
+
+### v2.2 - More Episodes
+- Added `/moreeps` command to add more episodes/seasons to shows already in Sonarr
+- Interactive season and episode browser with monitoring status indicators
+- Monitor all seasons, all episodes in a season, or just missing episodes
+- Automatic episode search triggered after monitoring is set
 
 ### v2.1 - Smart Detection & Season Selection
 - Added season selection for TV requests (All Seasons, Latest Season, Season 1)

@@ -251,6 +251,7 @@ async def info_command(update, context: CallbackContext):
         msg += "*Request Commands:*\n"
         msg += "\\- `/movie <title>` \\- Search for movies to request\n"
         msg += "\\- `/series <title>` or `/tv <title>` \\- Search for TV series\n"
+        msg += "\\- `/moreeps <title>` \\- Add more episodes/seasons to existing shows\n"
         msg += "\\- `/myrequests` or `/requests` \\- View your request history\n\n"
         
         msg += "*Server Commands:*\n"
@@ -283,6 +284,7 @@ async def info_command(update, context: CallbackContext):
         msg += "\\- Automatic Radarr/Sonarr integration\n"
         msg += "\\- Checks Plex library before adding duplicates\n"
         msg += "\\- Season selection \\(All, Latest, or Season 1\\)\n"
+        msg += "\\- Add more episodes/seasons to existing shows\n"
         msg += "\\- Support for multiple root folders/quality profiles\n"
         msg += "\\- Request tracking with automatic notifications\n"
         msg += "\\- Status updates every 15 minutes\n\n"

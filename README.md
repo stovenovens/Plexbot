@@ -18,6 +18,9 @@ A comprehensive Telegram bot for managing and monitoring a Plex media server wit
 - 🔍 **Duplicate Detection** - Checks Plex library and Sonarr/Radarr before adding content
 - 🌐 **Remote Access Check** - Verify if Plex is accessible to outside users
 - 📢 **Recently Added Notifications** - Automatic notifications when new content is added to Plex
+- 👋 **Auto Welcome** - Sends setup instructions to new group members automatically
+- 🧹 **Auto Cleanup** - Removes stale request tracking entries when media is deleted from Radarr/Sonarr
+- ⏳ **Smart Upcoming Detection** - Correctly identifies unaired seasons and shows the right message instead of falsely reporting downloads
 
 ## Commands
 
@@ -46,6 +49,10 @@ A comprehensive Telegram bot for managing and monitoring a Plex media server wit
 - `/logs` - View recent logs (authorized users)
 - `/testwake` - Test Wake-on-LAN
 - `/info` - Show help and available commands
+- `/welcome` - Show the welcome/getting started message
+- `/listrequests` - List all tracked requests
+- `/clearrequest <id>` - Remove a specific tracked request
+- `/clearrequests` - Clear all completed/notified requests
 
 ## Request System
 
@@ -289,6 +296,13 @@ If you find this bot useful, consider supporting development:
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
 ## Changelog
+
+### v2.3 - Smart Season Detection, DB Cleanup & Welcome Messages
+- **Fixed false "downloading now" for unaired seasons** - Bot now uses Sonarr's season-level statistics to correctly detect when a monitored season hasn't started airing yet, preventing misleading messages like "Found 200 release(s) - downloading now!" for future seasons
+- **Hint for previous seasons** - When a future season is detected, the bot now suggests using `/moreeps` to add previous seasons
+- **Auto DB cleanup** - Request tracking entries are automatically removed when media is deleted from Radarr/Sonarr, keeping the database clean without manual intervention
+- **Auto welcome message** - New members joining the group automatically receive a welcome message with Plex setup instructions and a link to the client setup guide
+- **Admin request management** - Added `/listrequests`, `/clearrequest`, and `/clearrequests` commands for managing the request database
 
 ### v2.2 - More Episodes
 - Added `/moreeps` command to add more episodes/seasons to shows already in Sonarr

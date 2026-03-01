@@ -498,3 +498,39 @@ async def clearrequests_command(update, context: CallbackContext):
     except Exception as e:
         logger.error("❌ Clear requests command failed: %s", e)
         await send_command_response(update, context, f"❌ Failed to clear requests: {escape_md(str(e))}", parse_mode=ParseMode.MARKDOWN_V2)
+
+
+async def new_member_handler(update, context):
+    """Send a welcome message when a new user joins the group"""
+    try:
+        for member in update.message.new_chat_members:
+            if member.is_bot:
+                continue
+
+            name = member.first_name or member.username or "there"
+
+            msg = (
+                f"👋 Welcome to the Plex group, *{escape_md(name)}*\\!\n\n"
+                f"🎬 *Before you start streaming:*\n"
+                f"• Download the Plex app on your device and sign in with your Plex account\n"
+                f"• Set up your Plex app per device using [this guide](https://mediaclients.wiki/Plex)\n"
+                f"• Test playback before requesting anything \\- make sure video and audio are working correctly\n\n"
+                f"🤖 *Once you're set up, this bot lets you:*\n"
+                f"• `/movie <title>` \\- Request a movie\n"
+                f"• `/series <title>` \\- Request a TV series\n"
+                f"• `/np` \\- See what's currently playing\n"
+                f"• `/myrequests` \\- Check your request status\n"
+                f"• `/info` \\- View all available commands\n\n"
+                f"If you run into any issues, tag an admin\\. Enjoy\\! 🍿"
+            )
+
+            await context.bot.send_message(
+                chat_id=GROUP_CHAT_ID,
+                text=msg,
+                message_thread_id=BOT_TOPIC_ID,
+                parse_mode=ParseMode.MARKDOWN_V2,
+            )
+            logger.info("👋 Sent welcome message to new member: %s", name)
+
+    except Exception as e:
+        logger.error("❌ New member welcome failed: %s", e)

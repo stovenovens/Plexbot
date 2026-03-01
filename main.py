@@ -8,7 +8,7 @@ import logging
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandler, filters
+from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandler, MessageHandler, filters
 from telegram.error import NetworkError, TimedOut, RetryAfter, TelegramError
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
@@ -20,7 +20,8 @@ from commands.media_commands import nowplaying_command, upcoming_command, hot_co
 from commands.server_commands import on_command, off_command, check_status_command, remote_check_command
 from commands.admin_commands import (
     debug_command, logs_command, testwake_command, info_command, welcome_command,
-    requests_admin_command, clearrequest_command, clearrequests_command
+    requests_admin_command, clearrequest_command, clearrequests_command,
+    new_member_handler
 )
 from commands.request_commands import movie_command, series_command, tv_command
 from commands.request_callbacks import handle_request_callback
@@ -211,6 +212,12 @@ def main():
     app.add_handler(CommandHandler("listrequests", requests_admin_command, filters=topic_filter))
     app.add_handler(CommandHandler("clearrequest", clearrequest_command, filters=topic_filter))
     app.add_handler(CommandHandler("clearrequests", clearrequests_command, filters=topic_filter))
+
+    # New member welcome handler
+    app.add_handler(MessageHandler(
+        filters.Chat(GROUP_CHAT_ID) & filters.StatusUpdate.NEW_CHAT_MEMBERS,
+        new_member_handler
+    ))
 
     # Callback query handlers (pattern-filtered to avoid conflicts)
     app.add_handler(CallbackQueryHandler(handle_moreeps_callback, pattern=r"^moreeps_"))

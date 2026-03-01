@@ -80,9 +80,10 @@ async def build_tv_success_message(show, title, sonarr_id, request_tracker):
     if not any_aired:
         return (
             f"✅ *{escape_md(title)}* has been added to Sonarr\\!\n\n"
-            f"⏳ The monitored season hasn't started airing yet\\. "
+            f"⏳ The latest season hasn't started airing yet\\. "
             f"Sonarr will automatically grab episodes as they become available\\.\n\n"
-            f"📬 You'll be notified when episodes are available\\."
+            f"📬 You'll be notified when episodes are available\\.\n\n"
+            f"💡 Want previous seasons? Use `/moreeps` to request them\\."
         )
 
     # Check if indexers found any results

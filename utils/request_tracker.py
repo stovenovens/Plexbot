@@ -548,6 +548,51 @@ class RequestTracker:
             logger.error("❌ Failed to check Radarr indexer results: %s", e)
             return 0, False
 
+    async def check_sonarr_monitored_episodes_aired(self, sonarr_id: int) -> bool:
+        """
+        Check if any monitored episodes for a Sonarr series have already aired.
+
+        Returns True if at least one monitored episode has an air date in the past,
+        False if all monitored episodes are upcoming/TBA (i.e. nothing to download yet).
+        """
+        if not (SONARR_URL and SONARR_API_KEY):
+            return True  # Assume aired if we can't check
+
+        try:
+            base_url = SONARR_URL.rstrip('/')
+            headers = {"X-Api-Key": SONARR_API_KEY}
+            today = datetime.now().date()
+
+            async with AsyncClient(timeout=15.0) as client:
+                for api_version in ["v3", "v2", "v1"]:
+                    try:
+                        url = f"{base_url}/api/{api_version}/episode?seriesId={sonarr_id}"
+                        resp = await client.get(url, headers=headers)
+                        if resp.status_code == 200:
+                            episodes = resp.json()
+                            for ep in episodes:
+                                if not ep.get("monitored"):
+                                    continue
+                                air_date_str = ep.get("airDate") or ep.get("airDateUtc", "")[:10]
+                                if not air_date_str:
+                                    continue
+                                try:
+                                    air_date = datetime.strptime(air_date_str[:10], "%Y-%m-%d").date()
+                                    if air_date <= today:
+                                        return True
+                                except (ValueError, TypeError):
+                                    continue
+                            return False  # No monitored episodes have aired yet
+                        elif resp.status_code == 404:
+                            continue
+                    except Exception as e:
+                        logger.debug("Sonarr episode check API %s failed: %s", api_version, e)
+                        continue
+        except Exception as e:
+            logger.error("❌ Failed to check Sonarr episode air dates: %s", e)
+
+        return True  # Default to assuming aired so we fall through to the normal flow
+
     async def check_sonarr_indexer_results(self, sonarr_id: int) -> Tuple[int, bool]:
         """
         Trigger a search in Sonarr and check if any releases are found

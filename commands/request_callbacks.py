@@ -73,6 +73,18 @@ async def build_tv_success_message(show, title, sonarr_id, request_tracker):
             f"📬 You'll be notified when episodes are available\\."
         )
 
+    # Check if any monitored episodes have actually aired yet
+    # This prevents a false "downloading now" when only future episodes are monitored
+    any_aired = await request_tracker.check_sonarr_monitored_episodes_aired(sonarr_id)
+
+    if not any_aired:
+        return (
+            f"✅ *{escape_md(title)}* has been added to Sonarr\\!\n\n"
+            f"⏳ The monitored season hasn't started airing yet\\. "
+            f"Sonarr will automatically grab episodes as they become available\\.\n\n"
+            f"📬 You'll be notified when episodes are available\\."
+        )
+
     # Check if indexers found any results
     result_count, search_done = await request_tracker.check_sonarr_indexer_results(sonarr_id)
 

@@ -641,10 +641,13 @@ class RequestTracker:
 
     async def check_sonarr_monitored_episodes_aired(self, sonarr_id: int) -> bool:
         """
-        Check if any monitored episodes for a Sonarr series have already aired.
+        Check if any episodes in a monitored season have already aired.
 
-        Returns True if at least one monitored episode has an air date in the past,
-        False if all monitored episodes are upcoming/TBA (i.e. nothing to download yet).
+        Uses season-level monitoring from the series data (set correctly at add-time)
+        rather than per-episode monitored flags (which may lag after initial add).
+
+        Returns True if at least one episode in a monitored season has an air date
+        in the past, False if all monitored-season episodes are upcoming/TBA.
         """
         if not (SONARR_URL and SONARR_API_KEY):
             return True  # Assume aired if we can't check
@@ -657,32 +660,63 @@ class RequestTracker:
             async with AsyncClient(timeout=15.0) as client:
                 for api_version in ["v3", "v2", "v1"]:
                     try:
-                        url = f"{base_url}/api/{api_version}/episode?seriesId={sonarr_id}"
-                        resp = await client.get(url, headers=headers)
-                        if resp.status_code == 200:
-                            episodes = resp.json()
-                            for ep in episodes:
-                                if not ep.get("monitored"):
-                                    continue
-                                air_date_str = ep.get("airDate") or ep.get("airDateUtc", "")[:10]
-                                if not air_date_str:
-                                    continue
-                                try:
-                                    air_date = datetime.strptime(air_date_str[:10], "%Y-%m-%d").date()
-                                    if air_date <= today:
-                                        return True
-                                except (ValueError, TypeError):
-                                    continue
-                            return False  # No monitored episodes have aired yet
-                        elif resp.status_code == 404:
+                        # Step 1: get series to find which seasons are monitored
+                        series_resp = await client.get(
+                            f"{base_url}/api/{api_version}/series/{sonarr_id}",
+                            headers=headers
+                        )
+                        if series_resp.status_code == 404:
                             continue
+                        if series_resp.status_code != 200:
+                            continue
+
+                        series = series_resp.json()
+                        monitored_seasons = {
+                            s["seasonNumber"]
+                            for s in series.get("seasons", [])
+                            if s.get("monitored") and s.get("seasonNumber", 0) > 0
+                        }
+
+                        if not monitored_seasons:
+                            # No seasons marked monitored — nothing to grab yet
+                            return False
+
+                        # Step 2: get all episodes for the series
+                        ep_resp = await client.get(
+                            f"{base_url}/api/{api_version}/episode?seriesId={sonarr_id}",
+                            headers=headers
+                        )
+                        if ep_resp.status_code != 200:
+                            continue
+
+                        episodes = ep_resp.json()
+                        for ep in episodes:
+                            if ep.get("seasonNumber", 0) not in monitored_seasons:
+                                continue
+                            air_date_str = ep.get("airDate") or ep.get("airDateUtc", "")[:10]
+                            if not air_date_str:
+                                continue
+                            try:
+                                air_date = datetime.strptime(air_date_str[:10], "%Y-%m-%d").date()
+                                if air_date <= today:
+                                    logger.debug(
+                                        "📅 Series %d: S%02dE%02d aired on %s (season monitored)",
+                                        sonarr_id, ep.get("seasonNumber", 0),
+                                        ep.get("episodeNumber", 0), air_date_str
+                                    )
+                                    return True
+                            except (ValueError, TypeError):
+                                continue
+
+                        return False  # All monitored-season episodes are still upcoming
+
                     except Exception as e:
                         logger.debug("Sonarr episode check API %s failed: %s", api_version, e)
                         continue
         except Exception as e:
             logger.error("❌ Failed to check Sonarr episode air dates: %s", e)
 
-        return True  # Default to assuming aired so we fall through to the normal flow
+        return True  # Default: assume aired so we fall through to normal flow
 
     async def check_sonarr_indexer_results(self, sonarr_id: int) -> Tuple[int, bool]:
         """

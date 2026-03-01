@@ -18,6 +18,9 @@ from config import (
 
 logger = logging.getLogger(__name__)
 
+# Hours before a pending request (no file, not in queue) is considered stalled
+STALL_HOURS = 4
+
 # Storage file for tracking requests
 REQUESTS_DB_FILE = Path(__file__).parent.parent / "data" / "requests.json"
 
@@ -91,7 +94,8 @@ class RequestTracker:
             "status": "pending",  # pending, downloading, available, failed, unreleased
             "requested_at": datetime.now().isoformat(),
             "notified": False,
-            "subscribers": [{"user_id": user_id, "username": username}]  # Track all users interested
+            "subscribers": [{"user_id": user_id, "username": username}],  # Track all users interested
+            "failure_notified": False
         }
 
         self.requests["requests"].append(request_data)
@@ -340,6 +344,88 @@ class RequestTracker:
             logger.error("❌ Failed to check Sonarr series status: %s", e)
             return "unknown", False
 
+    async def check_radarr_queue_failures(self) -> Dict[int, str]:
+        """
+        Check Radarr queue for items with download failures or warnings.
+        Returns a dict of {radarr_id: error_message} for any failed items.
+        """
+        if not (RADARR_URL and RADARR_API_KEY):
+            return {}
+
+        failed: Dict[int, str] = {}
+        try:
+            base_url = RADARR_URL.rstrip('/')
+            headers = {"X-Api-Key": RADARR_API_KEY}
+
+            async with AsyncClient(timeout=10.0) as client:
+                for api_version in ["v3", "v2", "v1"]:
+                    try:
+                        resp = await client.get(f"{base_url}/api/{api_version}/queue", headers=headers)
+                        if resp.status_code == 200:
+                            records = resp.json().get("records", [])
+                            for record in records:
+                                tracked_status = record.get("trackedDownloadStatus", "ok").lower()
+                                tracked_state = record.get("trackedDownloadState", "").lower()
+                                if tracked_status in ("warning", "error") or "failed" in tracked_state:
+                                    movie_id = record.get("movieId")
+                                    if movie_id:
+                                        msgs = record.get("statusMessages", [])
+                                        error_msg = next(
+                                            (m["messages"][0] for m in msgs if m.get("messages")),
+                                            tracked_state or "Download failed"
+                                        )
+                                        failed[movie_id] = error_msg
+                            return failed
+                        elif resp.status_code == 404:
+                            continue
+                    except Exception as e:
+                        logger.debug("Radarr queue failure check %s failed: %s", api_version, e)
+                        continue
+        except Exception as e:
+            logger.error("❌ Failed to check Radarr queue failures: %s", e)
+        return failed
+
+    async def check_sonarr_queue_failures(self) -> Dict[int, str]:
+        """
+        Check Sonarr queue for items with download failures or warnings.
+        Returns a dict of {sonarr_id: error_message} for any failed items.
+        """
+        if not (SONARR_URL and SONARR_API_KEY):
+            return {}
+
+        failed: Dict[int, str] = {}
+        try:
+            base_url = SONARR_URL.rstrip('/')
+            headers = {"X-Api-Key": SONARR_API_KEY}
+
+            async with AsyncClient(timeout=10.0) as client:
+                for api_version in ["v3", "v2", "v1"]:
+                    try:
+                        resp = await client.get(f"{base_url}/api/{api_version}/queue", headers=headers)
+                        if resp.status_code == 200:
+                            records = resp.json().get("records", [])
+                            for record in records:
+                                tracked_status = record.get("trackedDownloadStatus", "ok").lower()
+                                tracked_state = record.get("trackedDownloadState", "").lower()
+                                if tracked_status in ("warning", "error") or "failed" in tracked_state:
+                                    series_id = record.get("seriesId")
+                                    if series_id:
+                                        msgs = record.get("statusMessages", [])
+                                        error_msg = next(
+                                            (m["messages"][0] for m in msgs if m.get("messages")),
+                                            tracked_state or "Download failed"
+                                        )
+                                        failed[series_id] = error_msg
+                            return failed
+                        elif resp.status_code == 404:
+                            continue
+                    except Exception as e:
+                        logger.debug("Sonarr queue failure check %s failed: %s", api_version, e)
+                        continue
+        except Exception as e:
+            logger.error("❌ Failed to check Sonarr queue failures: %s", e)
+        return failed
+
     async def _media_exists_in_radarr(self, radarr_id: int) -> bool:
         """Quick existence check for a movie in Radarr. Returns False on 404."""
         if not (RADARR_URL and RADARR_API_KEY):
@@ -482,6 +568,10 @@ class RequestTracker:
         logger.info("🔍 Checking %d pending requests", len(pending_to_check))
         notifications_sent = 0
 
+        # Pre-fetch queue failures once per cycle to avoid repeated API calls
+        radarr_failures = await self.check_radarr_queue_failures()
+        sonarr_failures = await self.check_sonarr_queue_failures()
+
         for request in pending_to_check:
             try:
                 request_id = request["id"]
@@ -507,16 +597,40 @@ class RequestTracker:
                     # Update status
                     self.update_request_status(request_id, status)
 
+                    subscribers = request.get("subscribers", [{"user_id": user_id, "username": username}])
+
                     # Send notification if available
                     if has_file and status == "available":
-                        # Notify all subscribers
-                        subscribers = request.get("subscribers", [{"user_id": user_id, "username": username}])
                         for subscriber in subscribers:
                             await self.send_availability_notification(
                                 bot, subscriber["user_id"], subscriber["username"], title, media_type
                             )
                         self.update_request_status(request_id, status, notified=True)
                         notifications_sent += 1
+                    elif not request.get("failure_notified", False):
+                        if radarr_id in radarr_failures:
+                            logger.warning("⚠️ Download failure for '%s': %s", title, radarr_failures[radarr_id])
+                            for subscriber in subscribers:
+                                await self.send_failure_notification(
+                                    bot, subscriber["user_id"], subscriber["username"],
+                                    title, media_type, "queue_failure"
+                                )
+                            request["failure_notified"] = True
+                            self._save_requests()
+                        elif status == "pending":
+                            try:
+                                requested_at = datetime.fromisoformat(request["requested_at"])
+                                if datetime.now() - requested_at > timedelta(hours=STALL_HOURS):
+                                    logger.warning("⚠️ Request '%s' stalled >%dh, notifying", title, STALL_HOURS)
+                                    for subscriber in subscribers:
+                                        await self.send_failure_notification(
+                                            bot, subscriber["user_id"], subscriber["username"],
+                                            title, media_type, "stalled"
+                                        )
+                                    request["failure_notified"] = True
+                                    self._save_requests()
+                            except (ValueError, TypeError):
+                                pass
 
                 elif media_type == "tv":
                     sonarr_id = request.get("sonarr_id")
@@ -534,16 +648,40 @@ class RequestTracker:
                     # Update status
                     self.update_request_status(request_id, status)
 
+                    subscribers = request.get("subscribers", [{"user_id": user_id, "username": username}])
+
                     # Send notification if available
                     if has_episodes and status == "available":
-                        # Notify all subscribers
-                        subscribers = request.get("subscribers", [{"user_id": user_id, "username": username}])
                         for subscriber in subscribers:
                             await self.send_availability_notification(
                                 bot, subscriber["user_id"], subscriber["username"], title, media_type
                             )
                         self.update_request_status(request_id, status, notified=True)
                         notifications_sent += 1
+                    elif not request.get("failure_notified", False):
+                        if sonarr_id in sonarr_failures:
+                            logger.warning("⚠️ Download failure for '%s': %s", title, sonarr_failures[sonarr_id])
+                            for subscriber in subscribers:
+                                await self.send_failure_notification(
+                                    bot, subscriber["user_id"], subscriber["username"],
+                                    title, media_type, "queue_failure"
+                                )
+                            request["failure_notified"] = True
+                            self._save_requests()
+                        elif status == "pending":
+                            try:
+                                requested_at = datetime.fromisoformat(request["requested_at"])
+                                if datetime.now() - requested_at > timedelta(hours=STALL_HOURS):
+                                    logger.warning("⚠️ Request '%s' stalled >%dh, notifying", title, STALL_HOURS)
+                                    for subscriber in subscribers:
+                                        await self.send_failure_notification(
+                                            bot, subscriber["user_id"], subscriber["username"],
+                                            title, media_type, "stalled"
+                                        )
+                                    request["failure_notified"] = True
+                                    self._save_requests()
+                            except (ValueError, TypeError):
+                                pass
 
             except Exception as e:
                 logger.error("❌ Error checking request %s: %s", request.get("id"), e)
@@ -586,6 +724,46 @@ class RequestTracker:
 
         except Exception as e:
             logger.error("❌ Failed to send availability notification: %s", e)
+
+    async def send_failure_notification(self, bot: Bot, user_id: int,
+                                        username: str, title: str, media_type: str,
+                                        reason: str = "stalled"):
+        """Send notification to user that their requested content couldn't be found or downloaded"""
+        try:
+            from utils.helpers import escape_md
+            from telegram.constants import ParseMode
+
+            media_emoji = "🎬" if media_type == "movie" else "📺"
+            media_name = "movie" if media_type == "movie" else "series"
+
+            if reason == "stalled":
+                message = (
+                    f"⚠️ *No releases found for {escape_md(title)}*\n\n"
+                    f"{media_emoji} We couldn't find any downloads for your requested {media_name} "
+                    f"after several hours of searching\\. This can happen with obscure or older titles\\.\n\n"
+                    f"An admin has been notified and will look into it\\. 🔍"
+                )
+            else:
+                message = (
+                    f"⚠️ *Download issue for {escape_md(title)}*\n\n"
+                    f"{media_emoji} There was a problem downloading your requested {media_name}\\.\n\n"
+                    f"An admin has been notified and will look into it\\. 🔍"
+                )
+
+            mention = f"@{username} " if username and username != "Unknown" else ""
+
+            await bot.send_message(
+                chat_id=GROUP_CHAT_ID,
+                text=f"{mention}{message}",
+                message_thread_id=BOT_TOPIC_ID,
+                parse_mode=ParseMode.MARKDOWN_V2,
+                disable_notification=SILENT_NOTIFICATIONS
+            )
+
+            logger.info("⚠️ Sent failure notification for '%s' (%s) to user %s", title, reason, username)
+
+        except Exception as e:
+            logger.error("❌ Failed to send failure notification: %s", e)
 
     async def check_radarr_indexer_results(self, radarr_id: int) -> Tuple[int, bool]:
         """

@@ -340,6 +340,92 @@ class RequestTracker:
             logger.error("❌ Failed to check Sonarr series status: %s", e)
             return "unknown", False
 
+    async def _media_exists_in_radarr(self, radarr_id: int) -> bool:
+        """Quick existence check for a movie in Radarr. Returns False on 404."""
+        if not (RADARR_URL and RADARR_API_KEY):
+            return True
+        base_url = RADARR_URL.rstrip('/')
+        headers = {"X-Api-Key": RADARR_API_KEY}
+        try:
+            async with AsyncClient(timeout=10.0) as client:
+                for api_version in ["v3", "v2", "v1"]:
+                    try:
+                        resp = await client.get(f"{base_url}/api/{api_version}/movie/{radarr_id}", headers=headers)
+                        if resp.status_code == 200:
+                            return True
+                        elif resp.status_code == 404:
+                            continue
+                    except Exception:
+                        continue
+        except Exception:
+            pass
+        return False
+
+    async def _media_exists_in_sonarr(self, sonarr_id: int) -> bool:
+        """Quick existence check for a series in Sonarr. Returns False on 404."""
+        if not (SONARR_URL and SONARR_API_KEY):
+            return True
+        base_url = SONARR_URL.rstrip('/')
+        headers = {"X-Api-Key": SONARR_API_KEY}
+        try:
+            async with AsyncClient(timeout=10.0) as client:
+                for api_version in ["v3", "v2", "v1"]:
+                    try:
+                        resp = await client.get(f"{base_url}/api/{api_version}/series/{sonarr_id}", headers=headers)
+                        if resp.status_code == 200:
+                            return True
+                        elif resp.status_code == 404:
+                            continue
+                    except Exception:
+                        continue
+        except Exception:
+            pass
+        return False
+
+    async def cleanup_deleted_media(self):
+        """
+        Remove DB entries for media that has been deleted from Radarr/Sonarr,
+        and purge old notified requests past the 30-day retention period.
+
+        Pending requests are already cleaned up inside check_all_pending_requests
+        when they return 'unknown' status. This method covers notified entries.
+        """
+        notified = [r for r in self.requests["requests"] if r.get("notified", False)]
+        if not notified:
+            self.remove_old_requests(days=30)
+            return
+
+        removed = 0
+        for request in notified:
+            try:
+                media_type = request["media_type"]
+                title = request["title"]
+                request_id = request["id"]
+
+                if media_type == "movie":
+                    radarr_id = request.get("radarr_id")
+                    if radarr_id and not await self._media_exists_in_radarr(radarr_id):
+                        self.remove_request(request_id)
+                        removed += 1
+                        logger.info("🗑️ Removed notified request '%s' - deleted from Radarr", title)
+
+                elif media_type == "tv":
+                    sonarr_id = request.get("sonarr_id")
+                    if sonarr_id and not await self._media_exists_in_sonarr(sonarr_id):
+                        self.remove_request(request_id)
+                        removed += 1
+                        logger.info("🗑️ Removed notified request '%s' - deleted from Sonarr", title)
+
+            except Exception as e:
+                logger.error("❌ Error during cleanup check for '%s': %s", request.get("title"), e)
+                continue
+
+        if removed > 0:
+            logger.info("🧹 Cleaned up %d notified requests for deleted media", removed)
+
+        # Also purge old completed entries
+        self.remove_old_requests(days=30)
+
     async def check_all_pending_requests(self, bot: Bot):
         """
         Check status of all pending requests and send notifications for completed ones
@@ -350,6 +436,7 @@ class RequestTracker:
 
         if not pending:
             logger.debug("📭 No pending requests to check")
+            await self.cleanup_deleted_media()
             return
 
         # Filter out unreleased content - no point checking for them
@@ -374,6 +461,7 @@ class RequestTracker:
 
         if not pending_to_check:
             logger.debug("📭 No released pending requests to check")
+            await self.cleanup_deleted_media()
             return
 
         # Quick connectivity check before attempting full check
@@ -463,6 +551,9 @@ class RequestTracker:
 
         if notifications_sent > 0:
             logger.info("📬 Sent %d availability notifications", notifications_sent)
+
+        # Clean up notified entries for media deleted from Radarr/Sonarr
+        await self.cleanup_deleted_media()
 
     async def send_availability_notification(self, bot: Bot, user_id: int,
                                             username: str, title: str, media_type: str):

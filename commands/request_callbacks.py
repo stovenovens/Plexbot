@@ -78,13 +78,24 @@ async def build_tv_success_message(show, title, sonarr_id, request_tracker):
     any_aired = await request_tracker.check_sonarr_monitored_episodes_aired(sonarr_id)
 
     if not any_aired:
-        return (
-            f"✅ *{escape_md(title)}* has been added to Sonarr\\!\n\n"
-            f"⏳ The latest season hasn't started airing yet\\. "
-            f"Sonarr will automatically grab episodes as they become available\\.\n\n"
-            f"📬 You'll be notified when episodes are available\\.\n\n"
-            f"💡 Want previous seasons? Use `/moreeps` to request them\\."
-        )
+        season_num, premiere_date = await request_tracker.get_sonarr_upcoming_premiere(sonarr_id)
+        if premiere_date and season_num:
+            season_label = escape_md(f"Season {season_num}")
+            return (
+                f"✅ *{escape_md(title)}* has been added to Sonarr\\!\n\n"
+                f"📅 *{season_label} premieres {escape_md(premiere_date)}*\n\n"
+                f"Sonarr will automatically grab episodes as they become available\\.\n\n"
+                f"📬 You'll be notified when episodes are available\\.\n\n"
+                f"💡 Want previous seasons? Use `/moreeps` to request them\\."
+            )
+        else:
+            return (
+                f"✅ *{escape_md(title)}* has been added to Sonarr\\!\n\n"
+                f"⏳ The latest season hasn't started airing yet\\. "
+                f"Sonarr will automatically grab episodes as they become available\\.\n\n"
+                f"📬 You'll be notified when episodes are available\\.\n\n"
+                f"💡 Want previous seasons? Use `/moreeps` to request them\\."
+            )
 
     # Check if indexers found any results
     result_count, search_done = await request_tracker.check_sonarr_indexer_results(sonarr_id)

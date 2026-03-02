@@ -889,6 +889,84 @@ class RequestTracker:
 
         return True  # Default: assume aired so we fall through to normal flow
 
+    async def get_sonarr_upcoming_premiere(self, sonarr_id: int) -> Tuple[Optional[int], Optional[str]]:
+        """
+        Find the premiere date of the next unaired monitored season.
+
+        Returns:
+            (season_number, formatted_date) e.g. (2, "March 15, 2025")
+            or (season_number, None) if the season exists but no air date is set
+            or (None, None) if nothing found
+        """
+        if not (SONARR_URL and SONARR_API_KEY):
+            return None, None
+
+        try:
+            base_url = SONARR_URL.rstrip('/')
+            headers = {"X-Api-Key": SONARR_API_KEY}
+
+            async with AsyncClient(timeout=15.0) as client:
+                for api_version in ["v3", "v2", "v1"]:
+                    try:
+                        # Get series to find which monitored seasons haven't aired yet
+                        resp = await client.get(
+                            f"{base_url}/api/{api_version}/series/{sonarr_id}",
+                            headers=headers
+                        )
+                        if resp.status_code != 200:
+                            continue
+
+                        series = resp.json()
+                        upcoming_seasons = []
+                        for season in series.get("seasons", []):
+                            season_num = season.get("seasonNumber", 0)
+                            if season_num == 0:
+                                continue  # skip specials
+                            if not season.get("monitored"):
+                                continue
+                            if season.get("statistics", {}).get("episodeCount", 0) == 0:
+                                upcoming_seasons.append(season_num)
+
+                        if not upcoming_seasons:
+                            return None, None
+
+                        # Target the highest upcoming season number
+                        target_season = max(upcoming_seasons)
+
+                        # Fetch episodes for that season to find the premiere date
+                        ep_resp = await client.get(
+                            f"{base_url}/api/{api_version}/episode",
+                            headers=headers,
+                            params={"seriesId": sonarr_id, "seasonNumber": target_season}
+                        )
+                        if ep_resp.status_code != 200:
+                            return target_season, None
+
+                        episodes = ep_resp.json()
+                        earliest = None
+                        for ep in episodes:
+                            air_date = ep.get("airDate")  # YYYY-MM-DD
+                            if air_date:
+                                try:
+                                    d = datetime.strptime(air_date, "%Y-%m-%d")
+                                    if earliest is None or d < earliest:
+                                        earliest = d
+                                except ValueError:
+                                    pass
+
+                        if earliest:
+                            return target_season, earliest.strftime("%B %d, %Y")
+
+                        return target_season, None
+
+                    except Exception as e:
+                        logger.debug("Sonarr upcoming premiere check %s failed: %s", api_version, e)
+                        continue
+        except Exception as e:
+            logger.error("❌ Failed to get Sonarr upcoming premiere: %s", e)
+
+        return None, None
+
     async def check_sonarr_indexer_results(self, sonarr_id: int) -> Tuple[int, bool]:
         """
         Trigger a search in Sonarr and check if any releases are found

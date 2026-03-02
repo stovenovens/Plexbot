@@ -672,14 +672,19 @@ class RequestTracker:
                             try:
                                 requested_at = datetime.fromisoformat(request["requested_at"])
                                 if datetime.now() - requested_at > timedelta(hours=STALL_HOURS):
-                                    logger.warning("⚠️ Request '%s' stalled >%dh, notifying", title, STALL_HOURS)
-                                    for subscriber in subscribers:
-                                        await self.send_failure_notification(
-                                            bot, subscriber["user_id"], subscriber["username"],
-                                            title, media_type, "stalled"
-                                        )
-                                    request["failure_notified"] = True
-                                    self._save_requests()
+                                    # Don't flag as stalled if no episodes have aired yet
+                                    any_aired = await self.check_sonarr_monitored_episodes_aired(sonarr_id)
+                                    if not any_aired:
+                                        logger.info("⏳ '%s' stall skipped - no monitored episodes have aired yet", title)
+                                    else:
+                                        logger.warning("⚠️ Request '%s' stalled >%dh, notifying", title, STALL_HOURS)
+                                        for subscriber in subscribers:
+                                            await self.send_failure_notification(
+                                                bot, subscriber["user_id"], subscriber["username"],
+                                                title, media_type, "stalled"
+                                            )
+                                        request["failure_notified"] = True
+                                        self._save_requests()
                             except (ValueError, TypeError):
                                 pass
 

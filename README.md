@@ -302,6 +302,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 - **No releases found notification** - If a request has been pending for 4+ hours with no file and nothing in the download queue, the requester is automatically notified so they're not left waiting in silence
 - **Download failure notification** - If Radarr/Sonarr detects a download issue (warning or error status in the queue), the requester is alerted within 15 minutes
 - **Single notification per request** - Failure alerts fire once and won't repeat, but the requester will still get the normal "available" notification if the download eventually succeeds
+- **Fixed false stall alerts for unaired TV seasons** - Stall detection now checks whether any monitored episodes have actually aired before flagging a TV request as stalled, preventing false "no releases found" messages for upcoming seasons
 
 ### v2.3 - Smart Season Detection, DB Cleanup & Welcome Messages
 - **Fixed false "downloading now" for unaired seasons** - Bot now uses Sonarr's season-level statistics to correctly detect when a monitored season hasn't started airing yet, preventing misleading messages like "Found 200 release(s) - downloading now!" for future seasons

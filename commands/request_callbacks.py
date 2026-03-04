@@ -313,7 +313,25 @@ async def handle_sonarr_partial(query, callback_data):
 
     msg += "_Legend: ✅ Complete ⏬ Partial 👁️ Monitored ⬜ Not monitored_"
 
-    await edit_msg(msg, parse_mode=ParseMode.MARKDOWN_V2, reply_markup=InlineKeyboardMarkup(keyboard))
+    if is_photo:
+        # The season list has moreeps buttons whose callbacks call edit_message_text.
+        # That fails on photo messages, so delete the photo and send a plain text message
+        # instead — all subsequent moreeps interactions will then work correctly.
+        chat_id = query.message.chat_id
+        thread_id = query.message.message_thread_id
+        try:
+            await query.message.delete()
+        except Exception:
+            pass
+        await query.get_bot().send_message(
+            chat_id=chat_id,
+            text=msg,
+            message_thread_id=thread_id,
+            parse_mode=ParseMode.MARKDOWN_V2,
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+    else:
+        await query.edit_message_text(msg, parse_mode=ParseMode.MARKDOWN_V2, reply_markup=InlineKeyboardMarkup(keyboard))
 
 
 async def handle_movie_navigation(query, callback_data):

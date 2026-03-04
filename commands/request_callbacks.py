@@ -149,6 +149,19 @@ async def handle_request_callback(update, context: CallbackContext):
                 await query.edit_message_caption(caption=already_text, parse_mode=ParseMode.MARKDOWN_V2)
             else:
                 await query.edit_message_text(already_text, parse_mode=ParseMode.MARKDOWN_V2)
+        elif callback_data == "sonarr_partial":
+            partial_text = (
+                "⚠️ *Partial seasons in Sonarr*\n\n"
+                "This show is in Sonarr but only some seasons are tracked\\. "
+                "The missing seasons may still be available on Plex \\— check there first\\!\n\n"
+                "To track additional seasons, use:\n"
+                "`/moreeps <show name>`\n\n"
+                "_This lets you choose exactly which seasons and episodes to monitor\\._"
+            )
+            if query.message.photo:
+                await query.edit_message_caption(caption=partial_text, parse_mode=ParseMode.MARKDOWN_V2)
+            else:
+                await query.edit_message_text(partial_text, parse_mode=ParseMode.MARKDOWN_V2)
         elif callback_data == "already_on_plex":
             plex_text = "✅ This content is already available on Plex\\!\n\n🍿 You can watch it right now\\!"
             if query.message.photo:
@@ -317,26 +330,34 @@ async def handle_tv_navigation(query, callback_data):
         except (ValueError, IndexError):
             pass
 
-    # Check Plex (most authoritative - content is actually available)
-    already_on_plex = False
-    on_plex, _ = await request_manager.check_exists_in_plex(name, year, "show")
-    already_on_plex = on_plex
-
-    # Check Sonarr if not already on Plex (requires TVDB ID lookup from TMDB)
+    # Check Sonarr first (requires TVDB ID lookup from TMDB)
     already_in_sonarr = False
-    if not already_on_plex:
-        tmdb_id = show.get("id")
-        if tmdb_id:
-            tvdb_id = await request_manager.get_tvdb_id_from_tmdb(tmdb_id)
-            if tvdb_id:
-                exists, _ = await request_manager.check_series_exists_in_sonarr(tvdb_id)
-                already_in_sonarr = exists
+    sonarr_partial_seasons: list[int] = []
+    tmdb_id = show.get("id")
+    if tmdb_id:
+        tvdb_id = await request_manager.get_tvdb_id_from_tmdb(tmdb_id)
+        if tvdb_id:
+            exists, series_data = await request_manager.check_series_exists_in_sonarr(tvdb_id)
+            if exists and series_data:
+                is_partial, tracked = request_manager.get_sonarr_season_coverage(series_data)
+                if is_partial:
+                    sonarr_partial_seasons = tracked
+                else:
+                    already_in_sonarr = True
+
+    # Only check Plex if not in Sonarr at all
+    # (user cleans up Sonarr after download but keeps content on Plex)
+    already_on_plex = False
+    if not already_in_sonarr and not sonarr_partial_seasons:
+        on_plex, _ = await request_manager.check_exists_in_plex(name, year, "show")
+        already_on_plex = on_plex
 
     # Update message
     msg = request_manager.format_tv_result(show, new_index, len(results), search_note=search_note)
     keyboard = request_manager.create_tv_keyboard(
         show, new_index, len(results), search_id,
-        already_in_sonarr=already_in_sonarr, already_on_plex=already_on_plex
+        already_in_sonarr=already_in_sonarr, already_on_plex=already_on_plex,
+        sonarr_partial_seasons=sonarr_partial_seasons,
     )
     poster_url = request_manager.get_poster_url(show.get("poster_path"))
     

@@ -603,6 +603,37 @@ class RequestManager:
             logger.error("❌ Sonarr series check failed: %s", e)
             return False, None
 
+    def get_sonarr_season_coverage(self, series_data: dict) -> tuple[bool, list[int]]:
+        """
+        Inspect a Sonarr series object and determine whether season coverage is complete.
+
+        A season is considered "tracked" if it is monitored OR already has downloaded episodes.
+        Season 0 (Specials) is always ignored.
+
+        Returns:
+            is_partial  – True if one or more regular seasons are untracked
+            tracked     – list of tracked season numbers (for display)
+        """
+        seasons = series_data.get("seasons", [])
+        regular = [s for s in seasons if s.get("seasonNumber", 0) > 0]
+
+        if not regular:
+            return False, []
+
+        tracked = []
+        untracked = []
+        for s in regular:
+            stats = s.get("statistics", {})
+            monitored = s.get("monitored", False)
+            has_files = (stats.get("episodeFileCount") or 0) > 0
+            if monitored or has_files:
+                tracked.append(s["seasonNumber"])
+            else:
+                untracked.append(s["seasonNumber"])
+
+        is_partial = len(untracked) > 0 and len(tracked) > 0
+        return is_partial, sorted(tracked)
+
     async def get_tvdb_id_from_tmdb(self, tmdb_id: int):
         """Get TVDB ID for a TV show from TMDB external_ids endpoint"""
         if not TMDB_BEARER_TOKEN:
@@ -894,7 +925,8 @@ class RequestManager:
         return InlineKeyboardMarkup(keyboard)
     
     def create_tv_keyboard(self, show: dict, index: int, total: int, search_id: str,
-                            already_in_sonarr: bool = False, already_on_plex: bool = False):
+                            already_in_sonarr: bool = False, already_on_plex: bool = False,
+                            sonarr_partial_seasons: list[int] | None = None):
         """Create inline keyboard for TV show result
 
         Args:
@@ -902,8 +934,9 @@ class RequestManager:
             index: Current result index
             total: Total results
             search_id: Search session ID
-            already_in_sonarr: True if show exists in Sonarr
+            already_in_sonarr: True if show is fully tracked in Sonarr
             already_on_plex: True if show exists in Plex library
+            sonarr_partial_seasons: List of tracked season numbers when coverage is partial
         """
         keyboard = []
 
@@ -921,25 +954,29 @@ class RequestManager:
         tmdb_id = show.get("id")
         if tmdb_id:
             external_row.append(InlineKeyboardButton("🔗 TMDB", url=f"https://www.themoviedb.org/tv/{tmdb_id}"))
-        # Note: TV shows don't have direct IMDb IDs in TMDB API, would need additional lookup
         if external_row:
             keyboard.append(external_row)
 
-        # Add/Already Added button - Plex check takes priority
+        # Add/status button — Sonarr state takes priority; Plex only shown when not in Sonarr
         action_row = []
         if already_on_plex:
             action_row.append(InlineKeyboardButton("✅ Already on Plex!", callback_data="already_on_plex"))
         elif already_in_sonarr:
             action_row.append(InlineKeyboardButton("✅ Already in Sonarr!", callback_data="already_added"))
+        elif sonarr_partial_seasons:
+            season_str = ", ".join(f"S{s}" for s in sonarr_partial_seasons)
+            action_row.append(InlineKeyboardButton(
+                f"⚠️ Partial in Sonarr ({season_str})", callback_data="sonarr_partial"
+            ))
         else:
             if SONARR_URL and SONARR_API_KEY:
                 action_row.append(InlineKeyboardButton("➕ Add Series", callback_data=f"add_tv_{search_id}_{index}"))
             else:
                 action_row.append(InlineKeyboardButton("❌ Sonarr Not Configured", callback_data="not_configured"))
-        
+
         action_row.append(InlineKeyboardButton("❌ Cancel", callback_data=f"cancel_search_{search_id}"))
         keyboard.append(action_row)
-        
+
         return InlineKeyboardMarkup(keyboard)
 
 # Global request manager instance
@@ -1122,26 +1159,34 @@ async def series_command(update, context: CallbackContext):
             except (ValueError, IndexError):
                 pass
 
-        # Check Plex first (most authoritative - content is actually available)
-        already_on_plex = False
-        on_plex, _ = await request_manager.check_exists_in_plex(name, year, "show")
-        already_on_plex = on_plex
-
-        # Check Sonarr if not already on Plex (requires TVDB ID lookup from TMDB)
+        # Check Sonarr first (requires TVDB ID lookup from TMDB)
         already_in_sonarr = False
-        if not already_on_plex:
-            tmdb_id = first_show.get("id")
-            if tmdb_id:
-                tvdb_id = await request_manager.get_tvdb_id_from_tmdb(tmdb_id)
-                if tvdb_id:
-                    exists, _ = await request_manager.check_series_exists_in_sonarr(tvdb_id)
-                    already_in_sonarr = exists
+        sonarr_partial_seasons: list[int] = []
+        tmdb_id = first_show.get("id")
+        if tmdb_id:
+            tvdb_id = await request_manager.get_tvdb_id_from_tmdb(tmdb_id)
+            if tvdb_id:
+                exists, series_data = await request_manager.check_series_exists_in_sonarr(tvdb_id)
+                if exists and series_data:
+                    is_partial, tracked = request_manager.get_sonarr_season_coverage(series_data)
+                    if is_partial:
+                        sonarr_partial_seasons = tracked   # show which seasons are tracked
+                    else:
+                        already_in_sonarr = True           # fully tracked, normal status
+
+        # Only check Plex if not in Sonarr at all
+        # (user cleans up Sonarr after download but keeps content on Plex)
+        already_on_plex = False
+        if not already_in_sonarr and not sonarr_partial_seasons:
+            on_plex, _ = await request_manager.check_exists_in_plex(name, year, "show")
+            already_on_plex = on_plex
 
         # Format and send first result
         msg = request_manager.format_tv_result(first_show, 0, len(results), search_note=search_note)
         keyboard = request_manager.create_tv_keyboard(
             first_show, 0, len(results), search_id,
-            already_in_sonarr=already_in_sonarr, already_on_plex=already_on_plex
+            already_in_sonarr=already_in_sonarr, already_on_plex=already_on_plex,
+            sonarr_partial_seasons=sonarr_partial_seasons,
         )
         poster_url = request_manager.get_poster_url(first_show.get("poster_path"))
 

@@ -655,21 +655,25 @@ class RequestManager:
 
                     # Map Tautulli media types to our types
                     # Tautulli uses: movie, show, season, episode, artist, album, track
+                    # Only match at the correct level - never let an episode/season result
+                    # satisfy a show-level check, otherwise short titles like "Reunion"
+                    # match episode titles like "Season 3 Reunion Special"
                     type_match = False
                     if media_type == "movie" and item_media_type == "movie":
                         type_match = True
-                    elif media_type == "show" and item_media_type in ["show", "season", "episode"]:
+                    elif media_type == "show" and item_media_type == "show":
                         type_match = True
 
                     if not type_match:
                         continue
 
-                    # Check title match (exact or very close)
-                    title_match = (
-                        item_title == search_title_lower or
-                        search_title_lower in item_title or
-                        item_title in search_title_lower
-                    )
+                    # Check title match using fuzzy similarity rather than substring containment.
+                    # Substring checks are too loose - "reunion" matches "season 3 reunion special".
+                    # Strip leading articles before comparing so "The Reunion" == "Reunion".
+                    norm_search = _ARTICLES.sub("", search_title_lower).strip()
+                    norm_item   = _ARTICLES.sub("", item_title).strip()
+                    similarity = fuzz.token_sort_ratio(norm_search, norm_item)
+                    title_match = similarity >= 85
 
                     if title_match:
                         # If we have a year, verify it matches (allow 1 year difference)

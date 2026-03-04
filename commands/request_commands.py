@@ -4,12 +4,14 @@ Handles movie and TV series requests via TMDB search with Sonarr/Radarr integrat
 Similar to Searcharr but simplified for group chat use without authentication
 """
 
+import re
 import logging
 from datetime import datetime
 from telegram.ext import CallbackContext
 from telegram.constants import ParseMode
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 from httpx import AsyncClient
+from rapidfuzz import fuzz
 
 from config import (
     TMDB_BEARER_TOKEN, SONARR_URL, SONARR_API_KEY, RADARR_URL, RADARR_API_KEY,
@@ -19,6 +21,164 @@ from config import (
 from utils.helpers import send_command_response, escape_md
 
 logger = logging.getLogger(__name__)
+
+# Network keyword → typical origin countries for result re-ranking.
+# Sorted longest-first so "bbc one" is matched before "bbc".
+NETWORK_QUALIFIERS = {
+    "bbc one":       ["GB"],
+    "bbc two":       ["GB"],
+    "bbc three":     ["GB"],
+    "bbc four":      ["GB"],
+    "bbc america":   ["GB", "US"],
+    "bbc":           ["GB"],
+    "itv1":          ["GB"],
+    "itv2":          ["GB"],
+    "itv":           ["GB"],
+    "channel 4":     ["GB"],
+    "channel4":      ["GB"],
+    "channel 5":     ["GB"],
+    "channel5":      ["GB"],
+    "sky atlantic":  ["GB"],
+    "sky":           ["GB"],
+    "prime video":   [],
+    "apple tv+":     [],
+    "apple tv":      [],
+    "disney+":       [],
+    "disney":        [],
+    "paramount+":    ["US"],
+    "paramount":     ["US"],
+    "hbo max":       ["US"],
+    "hbo":           ["US"],
+    "netflix":       [],
+    "amazon":        [],
+    "hulu":          ["US"],
+    "peacock":       ["US"],
+    "showtime":      ["US"],
+    "fx":            ["US"],
+    "amc":           ["US"],
+    "abc":           ["US"],
+    "nbc":           ["US"],
+    "cbs":           ["US"],
+    "fox":           ["US"],
+    "pbs":           ["US"],
+    "max":           ["US"],
+    "abc australia": ["AU"],
+    "network ten":   ["AU"],
+    "stan":          ["AU"],
+}
+
+# Country/origin keyword → ISO 3166-1 alpha-2 code
+COUNTRY_QUALIFIERS = {
+    "british":    "GB",
+    "uk":         "GB",
+    "australian": "AU",
+    "aussie":     "AU",
+    "canadian":   "CA",
+    "irish":      "IE",
+    "korean":     "KR",
+    "k-drama":    "KR",
+    "kdrama":     "KR",
+    "japanese":   "JP",
+    "anime":      "JP",
+    "french":     "FR",
+    "german":     "DE",
+    "spanish":    "ES",
+    "swedish":    "SE",
+    "norwegian":  "NO",
+    "danish":     "DK",
+    "dutch":      "NL",
+    "italian":    "IT",
+}
+
+# Articles to try stripping in fallback searches
+_ARTICLES = re.compile(r"^(the|a|an)\s+", re.IGNORECASE)
+
+
+def parse_query_qualifiers(query: str) -> dict:
+    """
+    Strip network/country/year hints from a search query.
+
+    Returns:
+        clean_query         – what to send to TMDB (qualifiers removed)
+        preferred_countries – ISO codes inferred from network/country hints
+        year                – 4-digit year if found, else None
+    """
+    clean = query.lower().strip()
+    preferred_countries: set[str] = set()
+    year = None
+
+    # Extract year first so it doesn't interfere with other patterns
+    m = re.search(r"\b(19|20)\d{2}\b", clean)
+    if m:
+        year = int(m.group())
+        clean = (clean[:m.start()] + clean[m.end():]).strip()
+
+    # Network qualifiers – longest match first
+    for keyword in sorted(NETWORK_QUALIFIERS, key=len, reverse=True):
+        if re.search(r"\b" + re.escape(keyword) + r"\b", clean):
+            preferred_countries.update(NETWORK_QUALIFIERS[keyword])
+            clean = re.sub(r"\b" + re.escape(keyword) + r"\b", "", clean).strip()
+            break  # one network qualifier per query
+
+    # Country qualifiers – longest match first
+    for keyword, code in sorted(COUNTRY_QUALIFIERS.items(), key=lambda x: len(x[0]), reverse=True):
+        if re.search(r"\b" + re.escape(keyword) + r"\b", clean):
+            preferred_countries.add(code)
+            clean = re.sub(r"\b" + re.escape(keyword) + r"\b", "", clean).strip()
+            break
+
+    clean = " ".join(clean.split())
+    return {
+        "clean_query": clean if clean else query,
+        "preferred_countries": list(preferred_countries),
+        "year": year,
+    }
+
+
+def rank_results(results: list, original_query: str, preferred_countries: list, year: int | None) -> list:
+    """
+    Score and re-rank TMDB results using:
+      - rapidfuzz title similarity (handles typos & word-order differences)
+      - origin_country match bonus
+      - release year proximity bonus
+
+    TMDB's own ranking is preserved for equal scores (stable sort).
+    """
+    query_lower = original_query.lower()
+
+    def score(show):
+        title = (show.get("name") or show.get("title") or "").lower()
+        original_title = (show.get("original_name") or show.get("original_title") or "").lower()
+
+        # Best of regular title vs original title
+        similarity = max(
+            fuzz.token_sort_ratio(query_lower, title),
+            fuzz.token_sort_ratio(query_lower, original_title),
+        )
+
+        country_bonus = 0
+        if preferred_countries:
+            origin = show.get("origin_country", [])
+            if any(c in origin for c in preferred_countries):
+                country_bonus = 20
+
+        year_bonus = 0
+        if year is not None:
+            air_date = show.get("first_air_date") or show.get("release_date") or ""
+            if len(air_date) >= 4:
+                try:
+                    diff = abs(int(air_date[:4]) - year)
+                    if diff == 0:
+                        year_bonus = 10
+                    elif diff <= 2:
+                        year_bonus = 4
+                except ValueError:
+                    pass
+
+        return similarity + country_bonus + year_bonus
+
+    return sorted(results, key=score, reverse=True)
+
 
 def escape_search_message(query: str) -> str:
     """Create a properly escaped search message"""
@@ -79,7 +239,83 @@ class RequestManager:
         except Exception as e:
             logger.error("❌ TMDB TV search failed: %s", e)
             return None, str(e)
-    
+
+    async def smart_search_tv(self, raw_query: str) -> tuple[list, str | None, str]:
+        """
+        Search for TV series with qualifier stripping, fallback chain, and re-ranking.
+
+        Returns (results, error, effective_query_used)
+        effective_query_used is shown to the user so they know what was actually searched.
+        """
+        parsed = parse_query_qualifiers(raw_query)
+        clean = parsed["clean_query"]
+        preferred_countries = parsed["preferred_countries"]
+        year = parsed["year"]
+
+        # Build the fallback chain (deduplicated, preserving order)
+        candidates: list[str] = []
+        for q in [clean, raw_query, _ARTICLES.sub("", clean).strip()]:
+            q = q.strip()
+            if q and q not in candidates:
+                candidates.append(q)
+
+        results = []
+        used_query = clean
+        last_error = None
+
+        for attempt in candidates:
+            results, last_error = await self.search_tmdb_tv(attempt)
+            if last_error:
+                return [], last_error, attempt
+            if results:
+                used_query = attempt
+                logger.info("📺 TV search succeeded with query '%s' (raw: '%s')", attempt, raw_query)
+                break
+            logger.info("📺 TV search returned no results for '%s', trying next fallback", attempt)
+
+        if not results:
+            return [], None, raw_query
+
+        ranked = rank_results(results, clean, preferred_countries, year)
+        return ranked, None, used_query
+
+    async def smart_search_movie(self, raw_query: str) -> tuple[list, str | None, str]:
+        """
+        Search for movies with qualifier stripping, fallback chain, and re-ranking.
+
+        Returns (results, error, effective_query_used)
+        """
+        parsed = parse_query_qualifiers(raw_query)
+        clean = parsed["clean_query"]
+        preferred_countries = parsed["preferred_countries"]
+        year = parsed["year"]
+
+        candidates: list[str] = []
+        for q in [clean, raw_query, _ARTICLES.sub("", clean).strip()]:
+            q = q.strip()
+            if q and q not in candidates:
+                candidates.append(q)
+
+        results = []
+        used_query = clean
+        last_error = None
+
+        for attempt in candidates:
+            results, last_error = await self.search_tmdb_movie(attempt)
+            if last_error:
+                return [], last_error, attempt
+            if results:
+                used_query = attempt
+                logger.info("🎬 Movie search succeeded with query '%s' (raw: '%s')", attempt, raw_query)
+                break
+            logger.info("🎬 Movie search returned no results for '%s', trying next fallback", attempt)
+
+        if not results:
+            return [], None, raw_query
+
+        ranked = rank_results(results, clean, preferred_countries, year)
+        return ranked, None, used_query
+
     async def get_radarr_root_folders(self):
         """Get available root folders from Radarr"""
         if not (RADARR_URL and RADARR_API_KEY):
@@ -644,27 +880,29 @@ async def movie_command(update, context: CallbackContext):
     if not context.args:
         await send_command_response(update, context, "❌ Please provide a movie title to search for\\.\n\nExample: `/movie Inception`", parse_mode=ParseMode.MARKDOWN_V2)
         return
-    
+
     query = " ".join(context.args)
     user = update.effective_user
-    
-    logger.info("🎬 Movie search requested by %s (%s): '%s'", 
+
+    logger.info("🎬 Movie search requested by %s (%s): '%s'",
                 user.username or user.first_name, user.id, query)
-    
+
     try:
         await send_command_response(update, context, escape_search_message(f"movie: {query}"), parse_mode=ParseMode.MARKDOWN_V2)
-        
-        # Search TMDB
-        results, error = await request_manager.search_tmdb_movie(query)
-        
+
+        results, error, used_query = await request_manager.smart_search_movie(query)
+
         if error:
             await send_command_response(update, context, f"❌ Search failed: {escape_md(error)}", parse_mode=ParseMode.MARKDOWN_V2)
             return
-        
+
         if not results:
             await send_command_response(update, context, f"❌ No movies found for: *{escape_md(query)}*", parse_mode=ParseMode.MARKDOWN_V2)
             return
-        
+
+        if used_query.lower() != query.lower():
+            logger.info("🎬 Movie search used fallback query '%s' for raw '%s'", used_query, query)
+
         # Store search results
         search_id = f"movie_{user.id}_{int(datetime.now().timestamp())}"
         request_manager.active_searches[search_id] = {
@@ -674,7 +912,7 @@ async def movie_command(update, context: CallbackContext):
             "user_id": user.id,
             "current_index": 0
         }
-        
+
         # Check if first result already exists
         first_movie = results[0]
         tmdb_id = first_movie.get("id")
@@ -704,9 +942,9 @@ async def movie_command(update, context: CallbackContext):
             already_in_radarr=already_in_radarr, already_on_plex=already_on_plex
         )
         poster_url = request_manager.get_poster_url(first_movie.get("poster_path"))
-        
+
         await send_command_response_with_markup(update, context, msg, parse_mode=ParseMode.MARKDOWN_V2, reply_markup=keyboard, photo_url=poster_url)
-        
+
     except Exception as e:
         logger.error("❌ Movie search command failed: %s", e)
         await send_command_response(update, context, f"❌ Search failed: {escape_md(str(e))}", parse_mode=ParseMode.MARKDOWN_V2)
@@ -716,27 +954,29 @@ async def series_command(update, context: CallbackContext):
     if not context.args:
         await send_command_response(update, context, "❌ Please provide a TV series title to search for\\.\n\nExample: `/series Breaking Bad`", parse_mode=ParseMode.MARKDOWN_V2)
         return
-    
+
     query = " ".join(context.args)
     user = update.effective_user
-    
-    logger.info("📺 TV series search requested by %s (%s): '%s'", 
+
+    logger.info("📺 TV series search requested by %s (%s): '%s'",
                 user.username or user.first_name, user.id, query)
-    
+
     try:
         await send_command_response(update, context, escape_search_message(f"TV series: {query}"), parse_mode=ParseMode.MARKDOWN_V2)
-        
-        # Search TMDB
-        results, error = await request_manager.search_tmdb_tv(query)
-        
+
+        results, error, used_query = await request_manager.smart_search_tv(query)
+
         if error:
             await send_command_response(update, context, f"❌ Search failed: {escape_md(error)}", parse_mode=ParseMode.MARKDOWN_V2)
             return
-        
+
         if not results:
             await send_command_response(update, context, f"❌ No TV series found for: *{escape_md(query)}*", parse_mode=ParseMode.MARKDOWN_V2)
             return
-        
+
+        if used_query.lower() != query.lower():
+            logger.info("📺 TV search used fallback query '%s' for raw '%s'", used_query, query)
+
         # Store search results
         search_id = f"tv_{user.id}_{int(datetime.now().timestamp())}"
         request_manager.active_searches[search_id] = {
@@ -746,7 +986,7 @@ async def series_command(update, context: CallbackContext):
             "user_id": user.id,
             "current_index": 0
         }
-        
+
         # Check if first result already exists
         first_show = results[0]
         name = first_show.get("name", "")
@@ -779,9 +1019,9 @@ async def series_command(update, context: CallbackContext):
             already_in_sonarr=already_in_sonarr, already_on_plex=already_on_plex
         )
         poster_url = request_manager.get_poster_url(first_show.get("poster_path"))
-        
+
         await send_command_response_with_markup(update, context, msg, parse_mode=ParseMode.MARKDOWN_V2, reply_markup=keyboard, photo_url=poster_url)
-        
+
     except Exception as e:
         logger.error("❌ TV series search command failed: %s", e)
         await send_command_response(update, context, f"❌ Search failed: {escape_md(str(e))}", parse_mode=ParseMode.MARKDOWN_V2)

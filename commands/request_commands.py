@@ -212,6 +212,32 @@ def rank_results(results: list, original_query: str, preferred_countries: list, 
     return sorted(results, key=score, reverse=True)
 
 
+def build_search_note(raw_query: str, used_query: str, preferred_countries: list) -> str | None:
+    """
+    Build a small italic footnote showing what the bot actually searched.
+    Returns None when the search was used as-is with no filters applied.
+    """
+    COUNTRY_LABELS = {
+        "GB": "UK", "US": "US", "AU": "AU", "KR": "Korean",
+        "JP": "Japanese", "FR": "French", "DE": "German",
+        "ES": "Spanish", "SE": "Swedish", "NO": "Norwegian",
+        "DK": "Danish", "NL": "Dutch", "IT": "Italian",
+        "CA": "Canadian", "IE": "Irish",
+    }
+    parts = []
+
+    if used_query.lower().strip() != raw_query.lower().strip():
+        parts.append(f'Searched: "{escape_md(used_query)}"')
+
+    if preferred_countries:
+        country_str = "/".join(COUNTRY_LABELS.get(c, c) for c in preferred_countries)
+        parts.append(f"{escape_md(country_str)} results prioritised")
+
+    if not parts:
+        return None
+    return "_🔎 " + " \\· ".join(parts) + "_"
+
+
 def escape_search_message(query: str) -> str:
     """Create a properly escaped search message"""
     return f"🔍 Searching for: *{escape_md(query)}*"
@@ -746,7 +772,7 @@ class RequestManager:
             return None
         return f"https://image.tmdb.org/t/p/w500{poster_path}"
     
-    def format_movie_result(self, movie: dict, index: int, total: int):
+    def format_movie_result(self, movie: dict, index: int, total: int, search_note: str | None = None):
         """Format a movie search result for display"""
         try:
             title = movie.get("title", "Unknown Title")
@@ -756,29 +782,32 @@ class RequestManager:
                     year = f" ({movie['release_date'][:4]})"
                 except:
                     pass
-            
+
             overview = movie.get("overview", "No overview available")
             if len(overview) > 300:
                 overview = overview[:297] + "..."
-            
+
             rating = movie.get("vote_average", 0)
             vote_count = movie.get("vote_count", 0)
-            
+
             # Format rating with escaped decimal point
             rating_text = f"{rating:.1f}".replace(".", "\\.")
-            
+
             msg = f"🎬 *Movie Result {index + 1}/{total}*\n\n"
             msg += f"*{escape_md(title)}{escape_md(year)}*\n\n"
             msg += f"⭐ {rating_text}/10 \\({vote_count:,} votes\\)\n\n"
             msg += f"{escape_md(overview)}"
-            
+
+            if search_note:
+                msg += f"\n\n{search_note}"
+
             return msg
-            
+
         except Exception as e:
             logger.error("❌ Error formatting movie result: %s", e)
             return f"❌ Error formatting movie result"
-    
-    def format_tv_result(self, show: dict, index: int, total: int):
+
+    def format_tv_result(self, show: dict, index: int, total: int, search_note: str | None = None):
         """Format a TV show search result for display"""
         try:
             name = show.get("name", "Unknown Title")
@@ -788,22 +817,25 @@ class RequestManager:
                     year = f" ({show['first_air_date'][:4]})"
                 except:
                     pass
-            
+
             overview = show.get("overview", "No overview available")
             if len(overview) > 300:
                 overview = overview[:297] + "..."
-            
+
             rating = show.get("vote_average", 0)
             vote_count = show.get("vote_count", 0)
-            
+
             # Format rating with escaped decimal point
             rating_text = f"{rating:.1f}".replace(".", "\\.")
-            
+
             msg = f"📺 *TV Series Result {index + 1}/{total}*\n\n"
             msg += f"*{escape_md(name)}{escape_md(year)}*\n\n"
             msg += f"⭐ {rating_text}/10 \\({vote_count:,} votes\\)\n\n"
             msg += f"{escape_md(overview)}"
-            
+
+            if search_note:
+                msg += f"\n\n{search_note}"
+
             return msg
             
         except Exception as e:
@@ -984,6 +1016,10 @@ async def movie_command(update, context: CallbackContext):
         if used_query.lower() != query.lower():
             logger.info("🎬 Movie search used fallback query '%s' for raw '%s'", used_query, query)
 
+        # Build search transparency note
+        parsed = parse_query_qualifiers(query)
+        search_note = build_search_note(query, used_query, parsed["preferred_countries"])
+
         # Store search results
         search_id = f"movie_{user.id}_{int(datetime.now().timestamp())}"
         request_manager.active_searches[search_id] = {
@@ -993,6 +1029,7 @@ async def movie_command(update, context: CallbackContext):
             "user_id": user.id,
             "current_index": 0,
             "created_at": datetime.now(),
+            "search_note": search_note,
         }
 
         # Check if first result already exists
@@ -1018,7 +1055,7 @@ async def movie_command(update, context: CallbackContext):
             already_in_radarr = exists
 
         # Format and send first result
-        msg = request_manager.format_movie_result(first_movie, 0, len(results))
+        msg = request_manager.format_movie_result(first_movie, 0, len(results), search_note=search_note)
         keyboard = request_manager.create_movie_keyboard(
             first_movie, 0, len(results), search_id,
             already_in_radarr=already_in_radarr, already_on_plex=already_on_plex
@@ -1059,6 +1096,10 @@ async def series_command(update, context: CallbackContext):
         if used_query.lower() != query.lower():
             logger.info("📺 TV search used fallback query '%s' for raw '%s'", used_query, query)
 
+        # Build search transparency note
+        parsed = parse_query_qualifiers(query)
+        search_note = build_search_note(query, used_query, parsed["preferred_countries"])
+
         # Store search results
         search_id = f"tv_{user.id}_{int(datetime.now().timestamp())}"
         request_manager.active_searches[search_id] = {
@@ -1068,6 +1109,7 @@ async def series_command(update, context: CallbackContext):
             "user_id": user.id,
             "current_index": 0,
             "created_at": datetime.now(),
+            "search_note": search_note,
         }
 
         # Check if first result already exists
@@ -1096,7 +1138,7 @@ async def series_command(update, context: CallbackContext):
                     already_in_sonarr = exists
 
         # Format and send first result
-        msg = request_manager.format_tv_result(first_show, 0, len(results))
+        msg = request_manager.format_tv_result(first_show, 0, len(results), search_note=search_note)
         keyboard = request_manager.create_tv_keyboard(
             first_show, 0, len(results), search_id,
             already_in_sonarr=already_in_sonarr, already_on_plex=already_on_plex

@@ -205,9 +205,10 @@ async def handle_movie_navigation(query, callback_data):
     results = search_data["results"]
     if new_index < 0 or new_index >= len(results):
         return
-    
+
     movie = results[new_index]
     search_data["current_index"] = new_index
+    search_note = search_data.get("search_note")
 
     # Get movie info for checks
     tmdb_id = movie.get("id")
@@ -231,7 +232,7 @@ async def handle_movie_navigation(query, callback_data):
         already_in_radarr = exists
 
     # Update message
-    msg = request_manager.format_movie_result(movie, new_index, len(results))
+    msg = request_manager.format_movie_result(movie, new_index, len(results), search_note=search_note)
     keyboard = request_manager.create_movie_keyboard(
         movie, new_index, len(results), search_id,
         already_in_radarr=already_in_radarr, already_on_plex=already_on_plex
@@ -302,9 +303,10 @@ async def handle_tv_navigation(query, callback_data):
     results = search_data["results"]
     if new_index < 0 or new_index >= len(results):
         return
-    
+
     show = results[new_index]
     search_data["current_index"] = new_index
+    search_note = search_data.get("search_note")
 
     # Get show info for checks
     name = show.get("name", "")
@@ -331,7 +333,7 @@ async def handle_tv_navigation(query, callback_data):
                 already_in_sonarr = exists
 
     # Update message
-    msg = request_manager.format_tv_result(show, new_index, len(results))
+    msg = request_manager.format_tv_result(show, new_index, len(results), search_note=search_note)
     keyboard = request_manager.create_tv_keyboard(
         show, new_index, len(results), search_id,
         already_in_sonarr=already_in_sonarr, already_on_plex=already_on_plex

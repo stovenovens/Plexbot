@@ -106,6 +106,18 @@ async def on_startup(app):
     )
     logger.info("📺 Recently added notifications enabled - checking every 5 minutes")
 
+    # Purge stale search sessions every 10 minutes (TTL = 30 minutes)
+    from commands.request_commands import request_manager
+    scheduler.add_job(
+        lambda: request_manager.purge_stale_searches(ttl_minutes=30),
+        'interval',
+        minutes=10,
+        id='purge_stale_searches',
+        misfire_grace_time=300,
+        coalesce=True
+    )
+    logger.info("🧹 Stale search session cleanup enabled - running every 10 minutes (TTL: 30 min)")
+
     scheduler.start()
     logger.info("📅 Scheduler started with %d jobs", len(scheduler.get_jobs()))
     logger.info("⏰ Jobs configured with 30-minute grace period for missed executions")

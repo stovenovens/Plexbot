@@ -221,7 +221,46 @@ class RequestManager:
     
     def __init__(self):
         self.active_searches = {}  # Store search results by message_id
-    
+
+    def purge_stale_searches(self, ttl_minutes: int = 30) -> int:
+        """
+        Remove search sessions older than ttl_minutes and any orphaned add_* entries
+        whose parent session no longer exists. Returns the number of entries removed.
+
+        Two types of entries live in active_searches:
+          - Main sessions:  "tv_{uid}_{ts}" / "movie_{uid}_{ts}"  — have a created_at field
+          - Add sessions:   "add_tv_{search_id}" / "add_movie_{search_id}"  — derived from a main session
+        """
+        from datetime import timedelta
+        cutoff = datetime.now() - timedelta(minutes=ttl_minutes)
+        removed = 0
+
+        # 1. Expire main sessions that are older than the TTL
+        expired = [
+            key for key, data in list(self.active_searches.items())
+            if isinstance(data, dict)
+            and not key.startswith(("add_tv_", "add_movie_"))
+            and data.get("created_at", datetime.min) < cutoff
+        ]
+        for key in expired:
+            del self.active_searches[key]
+            removed += 1
+
+        # 2. Remove orphaned add_* entries whose parent search_id is gone
+        orphaned = [
+            key for key in list(self.active_searches.keys())
+            if key.startswith(("add_tv_", "add_movie_"))
+            and key.removeprefix("add_tv_").removeprefix("add_movie_") not in self.active_searches
+        ]
+        for key in orphaned:
+            del self.active_searches[key]
+            removed += 1
+
+        if removed:
+            logger.info("🧹 Purged %d stale search session(s) (%d expired, %d orphaned)",
+                        removed, len(expired), len(orphaned))
+        return removed
+
     async def search_tmdb_movie(self, query: str, page: int = 1):
         """Search for movies using TMDB API"""
         if not TMDB_BEARER_TOKEN:
@@ -952,7 +991,8 @@ async def movie_command(update, context: CallbackContext):
             "query": query,
             "results": results,
             "user_id": user.id,
-            "current_index": 0
+            "current_index": 0,
+            "created_at": datetime.now(),
         }
 
         # Check if first result already exists
@@ -1026,7 +1066,8 @@ async def series_command(update, context: CallbackContext):
             "query": query,
             "results": results,
             "user_id": user.id,
-            "current_index": 0
+            "current_index": 0,
+            "created_at": datetime.now(),
         }
 
         # Check if first result already exists

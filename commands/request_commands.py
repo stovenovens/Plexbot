@@ -12,6 +12,10 @@ from telegram.constants import ParseMode
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 from httpx import AsyncClient
 from rapidfuzz import fuzz
+from rapidfuzz.distance import Levenshtein as _Lev
+from spellchecker import SpellChecker
+
+_spell = SpellChecker()
 
 from config import (
     TMDB_BEARER_TOKEN, SONARR_URL, SONARR_API_KEY, RADARR_URL, RADARR_API_KEY,
@@ -92,6 +96,34 @@ COUNTRY_QUALIFIERS = {
 
 # Articles to try stripping in fallback searches
 _ARTICLES = re.compile(r"^(the|a|an)\s+", re.IGNORECASE)
+
+
+def spell_correct_query(query: str) -> str | None:
+    """
+    Attempt to spell-correct a query word by word.
+    Only accepts corrections within Levenshtein edit distance 1 (single-char fix).
+    This catches missing/extra letters ("stanger"→"stranger", "interstellr"→"interstellar")
+    while rejecting severely garbled words that would produce wrong results.
+    Returns the corrected string if anything changed, else None.
+    """
+    words = query.split()
+    corrected = []
+    changed = False
+    for word in words:
+        if len(word) <= 3 or word.isdigit():
+            corrected.append(word)
+            continue
+        suggestion = _spell.correction(word.lower())
+        if suggestion and suggestion != word.lower():
+            # Only accept if it's a single-character fix
+            if _Lev.distance(word.lower(), suggestion) == 1:
+                corrected.append(suggestion)
+                changed = True
+            else:
+                corrected.append(word)
+        else:
+            corrected.append(word)
+    return " ".join(corrected) if changed else None
 
 
 def parse_query_qualifiers(query: str) -> dict:
@@ -254,7 +286,10 @@ class RequestManager:
 
         # Build the fallback chain (deduplicated, preserving order)
         candidates: list[str] = []
-        for q in [clean, raw_query, _ARTICLES.sub("", clean).strip()]:
+        spell_corrected = spell_correct_query(clean)
+        for q in [clean, raw_query, _ARTICLES.sub("", clean).strip(), spell_corrected]:
+            if not q:
+                continue
             q = q.strip()
             if q and q not in candidates:
                 candidates.append(q)
@@ -291,7 +326,10 @@ class RequestManager:
         year = parsed["year"]
 
         candidates: list[str] = []
-        for q in [clean, raw_query, _ARTICLES.sub("", clean).strip()]:
+        spell_corrected = spell_correct_query(clean)
+        for q in [clean, raw_query, _ARTICLES.sub("", clean).strip(), spell_corrected]:
+            if not q:
+                continue
             q = q.strip()
             if q and q not in candidates:
                 candidates.append(q)

@@ -966,7 +966,8 @@ class RequestManager:
         elif sonarr_partial_seasons:
             season_str = ", ".join(f"S{s}" for s in sonarr_partial_seasons)
             action_row.append(InlineKeyboardButton(
-                f"⚠️ Partial in Sonarr ({season_str})", callback_data="sonarr_partial"
+                f"⚠️ Partial in Sonarr ({season_str})",
+                callback_data=f"sonarr_partial_{search_id}_{index}"
             ))
         else:
             if SONARR_URL and SONARR_API_KEY:

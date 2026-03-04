@@ -149,19 +149,8 @@ async def handle_request_callback(update, context: CallbackContext):
                 await query.edit_message_caption(caption=already_text, parse_mode=ParseMode.MARKDOWN_V2)
             else:
                 await query.edit_message_text(already_text, parse_mode=ParseMode.MARKDOWN_V2)
-        elif callback_data == "sonarr_partial":
-            partial_text = (
-                "⚠️ *Partial seasons in Sonarr*\n\n"
-                "This show is in Sonarr but only some seasons are tracked\\. "
-                "The missing seasons may still be available on Plex \\— check there first\\!\n\n"
-                "To track additional seasons, use:\n"
-                "`/moreeps <show name>`\n\n"
-                "_This lets you choose exactly which seasons and episodes to monitor\\._"
-            )
-            if query.message.photo:
-                await query.edit_message_caption(caption=partial_text, parse_mode=ParseMode.MARKDOWN_V2)
-            else:
-                await query.edit_message_text(partial_text, parse_mode=ParseMode.MARKDOWN_V2)
+        elif callback_data.startswith("sonarr_partial_"):
+            await handle_sonarr_partial(query, callback_data)
         elif callback_data == "already_on_plex":
             plex_text = "✅ This content is already available on Plex\\!\n\n🍿 You can watch it right now\\!"
             if query.message.photo:
@@ -189,6 +178,143 @@ async def handle_request_callback(update, context: CallbackContext):
             await query.edit_message_text(f"❌ Error: {str(e)}")
         except:
             pass
+
+async def handle_sonarr_partial(query, callback_data):
+    """Handle partial Sonarr button — launch moreeps season UI directly for the show"""
+    from datetime import datetime as _dt
+    from commands.moreeps_commands import (
+        search_sonarr_series, get_sonarr_series_details,
+        get_sonarr_episodes, moreeps_sessions
+    )
+
+    # Parse: sonarr_partial_{search_id}_{index}
+    parts = callback_data.split("_")
+    index = int(parts[-1])
+    search_id = "_".join(parts[2:-1])
+
+    user_id = query.from_user.id
+    is_photo = bool(query.message.photo)
+
+    async def edit_msg(text, **kwargs):
+        if is_photo:
+            await query.edit_message_caption(caption=text, **kwargs)
+        else:
+            await query.edit_message_text(text, **kwargs)
+
+    # Look up show name from active search session
+    search_data = request_manager.active_searches.get(search_id)
+    show_name = ""
+    if search_data:
+        results = search_data.get("results", [])
+        if index < len(results):
+            show_name = results[index].get("name", "")
+
+    if not show_name:
+        await edit_msg(
+            "❌ Session expired\\. Please use `/moreeps <show name>` to manage episodes\\.",
+            parse_mode=ParseMode.MARKDOWN_V2
+        )
+        return
+
+    await edit_msg(
+        f"🔍 Loading *{escape_md(show_name)}* season info\\.\\.\\.",
+        parse_mode=ParseMode.MARKDOWN_V2
+    )
+
+    # Search Sonarr for the show
+    matches, error = await search_sonarr_series(show_name)
+
+    if error:
+        await edit_msg(f"❌ {escape_md(error)}", parse_mode=ParseMode.MARKDOWN_V2)
+        return
+
+    if not matches:
+        await edit_msg(
+            f"❌ *{escape_md(show_name)}* not found in Sonarr\\.\n\n"
+            f"_The show may have been removed from Sonarr\\. "
+            f"Use `/moreeps {escape_md(show_name)}` to check manually\\._",
+            parse_mode=ParseMode.MARKDOWN_V2
+        )
+        return
+
+    # Use best match (first result — Sonarr returns exact matches first)
+    series = matches[0]
+    sonarr_id = series.get("id")
+    title = series.get("title", show_name)
+
+    # Fetch full season and episode data
+    series_data, err = await get_sonarr_series_details(sonarr_id)
+    if err:
+        await edit_msg(f"❌ {escape_md(err)}", parse_mode=ParseMode.MARKDOWN_V2)
+        return
+
+    episodes, _ = await get_sonarr_episodes(sonarr_id)
+    episodes = episodes or []
+
+    # Create a moreeps session so all existing moreeps callbacks work
+    session_id = f"moreeps_{user_id}_{int(_dt.now().timestamp())}"
+    moreeps_sessions[session_id] = {
+        "user_id": user_id,
+        "sonarr_id": sonarr_id,
+        "title": title,
+        "series_data": series_data,
+        "episodes": episodes,
+    }
+
+    # Build season list (mirrors show_series_seasons logic)
+    seasons = series_data.get("seasons", [])
+    regular_seasons = [s for s in seasons if s.get("seasonNumber", 0) > 0]
+
+    season_eps = {}
+    for ep in episodes:
+        sn = ep.get("seasonNumber", 0)
+        if sn == 0:
+            continue
+        if sn not in season_eps:
+            season_eps[sn] = {"total": 0, "monitored": 0, "has_file": 0}
+        season_eps[sn]["total"] += 1
+        if ep.get("monitored"):
+            season_eps[sn]["monitored"] += 1
+        if ep.get("hasFile"):
+            season_eps[sn]["has_file"] += 1
+
+    msg = f"📺 *{escape_md(title)}*\n\nSelect a season to manage episodes:\n\n"
+    keyboard = []
+
+    for season in sorted(regular_seasons, key=lambda s: s.get("seasonNumber", 0)):
+        sn = season.get("seasonNumber", 0)
+        ep_info = season_eps.get(sn, {"total": 0, "monitored": 0, "has_file": 0})
+        total_eps = ep_info["total"]
+        downloaded = ep_info["has_file"]
+        mon_count = ep_info["monitored"]
+
+        if downloaded == total_eps and total_eps > 0:
+            status = "✅"
+        elif downloaded > 0:
+            status = "⏬"
+        elif mon_count > 0:
+            status = "👁️"
+        else:
+            status = "⬜"
+
+        keyboard.append([InlineKeyboardButton(
+            f"{status} Season {sn} ({downloaded}/{total_eps} eps)",
+            callback_data=f"moreeps_season_{session_id}_{sn}"
+        )])
+
+    keyboard.append([InlineKeyboardButton(
+        "📦 Monitor All Seasons",
+        callback_data=f"moreeps_allseasons_{session_id}"
+    )])
+    keyboard.append([InlineKeyboardButton(
+        "❌ Cancel",
+        callback_data=f"moreeps_cancel_{session_id}"
+    )])
+
+    msg += "_Legend: ✅ Complete ⏬ Partial 👁️ Monitored ⬜ Not monitored_"
+
+    await edit_msg(msg, parse_mode=ParseMode.MARKDOWN_V2, reply_markup=InlineKeyboardMarkup(keyboard))
+
 
 async def handle_movie_navigation(query, callback_data):
     """Handle movie result navigation"""

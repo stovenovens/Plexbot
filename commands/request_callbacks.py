@@ -378,8 +378,14 @@ async def handle_movie_navigation(query, callback_data):
             pass
 
     # Check Plex first (most authoritative - content is actually available)
-    already_on_plex = False
     on_plex, _ = await request_manager.check_exists_in_plex(title, year, "movie")
+    if on_plex is None:
+        plex_err = "❌ *Plex server is unavailable*\\.\n\nPlease use `/on` to wake up the server, then try again\\."
+        if query.message.photo:
+            await query.edit_message_caption(caption=plex_err, parse_mode=ParseMode.MARKDOWN_V2)
+        else:
+            await query.edit_message_text(plex_err, parse_mode=ParseMode.MARKDOWN_V2)
+        return
     already_on_plex = on_plex
 
     # Then check Radarr if not on Plex
@@ -409,8 +415,7 @@ async def handle_movie_navigation(query, callback_data):
         from config import SILENT_NOTIFICATIONS
         
         if poster_url:
-            # Send new message with poster
-            await query.get_bot().send_photo(
+            sent = await query.get_bot().send_photo(
                 chat_id=chat_id,
                 photo=poster_url,
                 caption=msg,
@@ -420,8 +425,7 @@ async def handle_movie_navigation(query, callback_data):
                 disable_notification=SILENT_NOTIFICATIONS
             )
         else:
-            # Send new message as text
-            await query.get_bot().send_message(
+            sent = await query.get_bot().send_message(
                 chat_id=chat_id,
                 text=msg,
                 message_thread_id=message_thread_id,
@@ -429,6 +433,8 @@ async def handle_movie_navigation(query, callback_data):
                 reply_markup=keyboard,
                 disable_notification=SILENT_NOTIFICATIONS
             )
+        search_data["chat_id"] = sent.chat_id
+        search_data["message_id"] = sent.message_id
     except Exception as e:
         logger.error("❌ Failed to update movie navigation: %s", e)
 
@@ -494,6 +500,13 @@ async def handle_tv_navigation(query, callback_data):
     already_on_plex = False
     if not already_in_sonarr and not sonarr_partial_seasons:
         on_plex, _ = await request_manager.check_exists_in_plex(name, year, "show")
+        if on_plex is None:
+            plex_err = "❌ *Plex server is unavailable*\\.\n\nPlease use `/on` to wake up the server, then try again\\."
+            if query.message.photo:
+                await query.edit_message_caption(caption=plex_err, parse_mode=ParseMode.MARKDOWN_V2)
+            else:
+                await query.edit_message_text(plex_err, parse_mode=ParseMode.MARKDOWN_V2)
+            return
         already_on_plex = on_plex
 
     # Update message
@@ -518,8 +531,7 @@ async def handle_tv_navigation(query, callback_data):
         from config import SILENT_NOTIFICATIONS
         
         if poster_url:
-            # Send new message with poster
-            await query.get_bot().send_photo(
+            sent = await query.get_bot().send_photo(
                 chat_id=chat_id,
                 photo=poster_url,
                 caption=msg,
@@ -529,8 +541,7 @@ async def handle_tv_navigation(query, callback_data):
                 disable_notification=SILENT_NOTIFICATIONS
             )
         else:
-            # Send new message as text
-            await query.get_bot().send_message(
+            sent = await query.get_bot().send_message(
                 chat_id=chat_id,
                 text=msg,
                 message_thread_id=message_thread_id,
@@ -538,6 +549,8 @@ async def handle_tv_navigation(query, callback_data):
                 reply_markup=keyboard,
                 disable_notification=SILENT_NOTIFICATIONS
             )
+        search_data["chat_id"] = sent.chat_id
+        search_data["message_id"] = sent.message_id
     except Exception as e:
         logger.error("❌ Failed to update TV navigation: %s", e)
 
@@ -577,6 +590,13 @@ async def handle_add_movie(query, callback_data):
 
     # Check if already on Plex before adding
     on_plex, _ = await request_manager.check_exists_in_plex(title, year, "movie")
+    if on_plex is None:
+        plex_err = "❌ *Plex server is unavailable*\\.\n\nPlease use `/on` to wake up the server, then try again\\."
+        if query.message.photo:
+            await query.edit_message_caption(caption=plex_err, parse_mode=ParseMode.MARKDOWN_V2)
+        else:
+            await query.edit_message_text(plex_err, parse_mode=ParseMode.MARKDOWN_V2)
+        return
     if on_plex:
         msg = f"✅ *{escape_md(title)}* is already available on Plex\\!\n\n🍿 You can watch it right now\\!"
         if query.message.photo:
@@ -723,6 +743,13 @@ async def handle_add_tv(query, callback_data):
 
     # Check if already on Plex before adding
     on_plex, _ = await request_manager.check_exists_in_plex(name, year, "show")
+    if on_plex is None:
+        plex_err = "❌ *Plex server is unavailable*\\.\n\nPlease use `/on` to wake up the server, then try again\\."
+        if query.message.photo:
+            await query.edit_message_caption(caption=plex_err, parse_mode=ParseMode.MARKDOWN_V2)
+        else:
+            await query.edit_message_text(plex_err, parse_mode=ParseMode.MARKDOWN_V2)
+        return
     if on_plex:
         msg = f"✅ *{escape_md(name)}* is already available on Plex\\!\n\n🍿 You can watch it right now\\!"
         if query.message.photo:

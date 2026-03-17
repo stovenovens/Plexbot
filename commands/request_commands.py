@@ -248,7 +248,7 @@ class RequestManager:
     def __init__(self):
         self.active_searches = {}  # Store search results by message_id
 
-    def purge_stale_searches(self, ttl_minutes: int = 30) -> int:
+    async def purge_stale_searches(self, bot=None, ttl_minutes: int = 30) -> int:
         """
         Remove search sessions older than ttl_minutes and any orphaned add_* entries
         whose parent session no longer exists. Returns the number of entries removed.
@@ -269,6 +269,20 @@ class RequestManager:
             and data.get("created_at", datetime.min) < cutoff
         ]
         for key in expired:
+            data = self.active_searches[key]
+            # Remove inline keyboard from the Telegram message so buttons stop working
+            if bot:
+                chat_id = data.get("chat_id")
+                message_id = data.get("message_id")
+                if chat_id and message_id:
+                    try:
+                        await bot.edit_message_reply_markup(
+                            chat_id=chat_id,
+                            message_id=message_id,
+                            reply_markup=None
+                        )
+                    except Exception:
+                        pass  # Message may already be deleted or edited
             del self.active_searches[key]
             removed += 1
 
@@ -688,14 +702,14 @@ class RequestManager:
                 resp = await client.get(search_url, params=params)
 
                 if resp.status_code != 200:
-                    logger.info("🔍 Plex check: Tautulli search returned %d", resp.status_code)
-                    return False, None
+                    logger.warning("🔍 Plex check: Tautulli returned %d — treating as unavailable", resp.status_code)
+                    return None, None
 
                 result = resp.json()
 
                 if result.get("response", {}).get("result") != "success":
-                    logger.info("🔍 Plex check: Tautulli search not successful")
-                    return False, None
+                    logger.warning("🔍 Plex check: Tautulli API error — treating as unavailable")
+                    return None, None
 
                 # Get search results - handle various response structures
                 data = result.get("response", {}).get("data", {})
@@ -794,8 +808,8 @@ class RequestManager:
                 return False, None
 
         except Exception as e:
-            logger.error("❌ Plex library check failed: %s", e)
-            return False, None
+            logger.warning("❌ Plex library check failed (server likely offline): %s", e)
+            return None, None
 
     def get_poster_url(self, poster_path: str):
         """Get full TMDB poster URL"""
@@ -984,12 +998,11 @@ class RequestManager:
 request_manager = RequestManager()
 
 async def send_command_response_with_markup(update, context: CallbackContext, message: str, parse_mode=None, reply_markup=None, photo_url=None):
-    """Send command response with reply markup and optional photo support"""
+    """Send command response with reply markup and optional photo support. Returns the sent Message."""
     try:
         # Always send to bot topic for cleaner general chat
         if photo_url:
-            # Send photo with caption
-            await context.bot.send_photo(
+            sent = await context.bot.send_photo(
                 chat_id=GROUP_CHAT_ID,
                 photo=photo_url,
                 caption=message,
@@ -999,8 +1012,7 @@ async def send_command_response_with_markup(update, context: CallbackContext, me
                 disable_notification=SILENT_NOTIFICATIONS
             )
         else:
-            # Send text message
-            await context.bot.send_message(
+            sent = await context.bot.send_message(
                 chat_id=GROUP_CHAT_ID,
                 text=message,
                 message_thread_id=BOT_TOPIC_ID,
@@ -1008,12 +1020,14 @@ async def send_command_response_with_markup(update, context: CallbackContext, me
                 reply_markup=reply_markup,
                 disable_notification=SILENT_NOTIFICATIONS
             )
-        
+
         # If command was issued outside bot topic, send a redirect message
         if BOT_TOPIC_ID and update.message and update.message.message_thread_id != BOT_TOPIC_ID:
             redirect_msg = f"👀 Response sent to bot topic"
             await update.message.reply_text(redirect_msg, disable_notification=SILENT_NOTIFICATIONS)
-            
+
+        return sent
+
     except Exception as e:
         logger.error("❌ Failed to send command response: %s", e)
         # Fallback: send to where command was issued
@@ -1025,6 +1039,7 @@ async def send_command_response_with_markup(update, context: CallbackContext, me
                     await update.message.reply_text(message, parse_mode=parse_mode, reply_markup=reply_markup, disable_notification=SILENT_NOTIFICATIONS)
         except Exception as fallback_error:
             logger.error("❌ Failed to send response even as fallback: %s", fallback_error)
+        return None
 
 async def movie_command(update, context: CallbackContext):
     """Search for movies to request"""
@@ -1082,8 +1097,14 @@ async def movie_command(update, context: CallbackContext):
                 pass
 
         # Check Plex first (most authoritative - content is actually available)
-        already_on_plex = False
         on_plex, _ = await request_manager.check_exists_in_plex(title, year, "movie")
+        if on_plex is None:
+            await send_command_response(
+                update, context,
+                "❌ *Plex server is unavailable*\\.\n\nPlease use `/on` to wake up the server, then try again\\.",
+                parse_mode=ParseMode.MARKDOWN_V2
+            )
+            return
         already_on_plex = on_plex
 
         # Then check Radarr (content is being managed/downloaded)
@@ -1100,7 +1121,10 @@ async def movie_command(update, context: CallbackContext):
         )
         poster_url = request_manager.get_poster_url(first_movie.get("poster_path"))
 
-        await send_command_response_with_markup(update, context, msg, parse_mode=ParseMode.MARKDOWN_V2, reply_markup=keyboard, photo_url=poster_url)
+        sent = await send_command_response_with_markup(update, context, msg, parse_mode=ParseMode.MARKDOWN_V2, reply_markup=keyboard, photo_url=poster_url)
+        if sent:
+            request_manager.active_searches[search_id]["chat_id"] = sent.chat_id
+            request_manager.active_searches[search_id]["message_id"] = sent.message_id
 
     except Exception as e:
         logger.error("❌ Movie search command failed: %s", e)
@@ -1180,6 +1204,13 @@ async def series_command(update, context: CallbackContext):
         already_on_plex = False
         if not already_in_sonarr and not sonarr_partial_seasons:
             on_plex, _ = await request_manager.check_exists_in_plex(name, year, "show")
+            if on_plex is None:
+                await send_command_response(
+                    update, context,
+                    "❌ *Plex server is unavailable*\\.\n\nPlease use `/on` to wake up the server, then try again\\.",
+                    parse_mode=ParseMode.MARKDOWN_V2
+                )
+                return
             already_on_plex = on_plex
 
         # Format and send first result
@@ -1191,7 +1222,10 @@ async def series_command(update, context: CallbackContext):
         )
         poster_url = request_manager.get_poster_url(first_show.get("poster_path"))
 
-        await send_command_response_with_markup(update, context, msg, parse_mode=ParseMode.MARKDOWN_V2, reply_markup=keyboard, photo_url=poster_url)
+        sent = await send_command_response_with_markup(update, context, msg, parse_mode=ParseMode.MARKDOWN_V2, reply_markup=keyboard, photo_url=poster_url)
+        if sent:
+            request_manager.active_searches[search_id]["chat_id"] = sent.chat_id
+            request_manager.active_searches[search_id]["message_id"] = sent.message_id
 
     except Exception as e:
         logger.error("❌ TV series search command failed: %s", e)

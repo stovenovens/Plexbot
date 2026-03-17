@@ -108,10 +108,14 @@ async def on_startup(app):
 
     # Purge stale search sessions every 10 minutes (TTL = 30 minutes)
     from commands.request_commands import request_manager
+    async def purge_stale_searches_job(bot):
+        await request_manager.purge_stale_searches(bot=bot, ttl_minutes=30)
+
     scheduler.add_job(
-        lambda: request_manager.purge_stale_searches(ttl_minutes=30),
+        purge_stale_searches_job,
         'interval',
         minutes=10,
+        args=[app.bot],
         id='purge_stale_searches',
         misfire_grace_time=300,
         coalesce=True

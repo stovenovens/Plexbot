@@ -13,7 +13,7 @@ from telegram import Bot
 
 from config import (
     RADARR_URL, RADARR_API_KEY, SONARR_URL, SONARR_API_KEY,
-    GROUP_CHAT_ID, BOT_TOPIC_ID, SILENT_NOTIFICATIONS
+    GROUP_CHAT_ID, BOT_TOPIC_ID, SILENT_NOTIFICATIONS, OFF_USER_IDS
 )
 
 logger = logging.getLogger(__name__)
@@ -741,18 +741,22 @@ class RequestTracker:
             media_emoji = "🎬" if media_type == "movie" else "📺"
             media_name = "movie" if media_type == "movie" else "series"
 
+            admin_mentions = " ".join(
+                f"[admin](tg://user?id={uid})" for uid in OFF_USER_IDS
+            ) if OFF_USER_IDS else "an admin"
+
             if reason == "stalled":
                 message = (
                     f"⚠️ *No releases found for {escape_md(title)}*\n\n"
                     f"{media_emoji} We couldn't find any downloads for your requested {media_name} "
                     f"after several hours of searching\\. This can happen with obscure or older titles\\.\n\n"
-                    f"An admin has been notified and will look into it\\. 🔍"
+                    f"{admin_mentions} has been notified and will look into it\\. 🔍"
                 )
             else:
                 message = (
                     f"⚠️ *Download issue for {escape_md(title)}*\n\n"
                     f"{media_emoji} There was a problem downloading your requested {media_name}\\.\n\n"
-                    f"An admin has been notified and will look into it\\. 🔍"
+                    f"{admin_mentions} has been notified and will look into it\\. 🔍"
                 )
 
             mention = f"@{username} " if username and username != "Unknown" else ""

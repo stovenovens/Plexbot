@@ -1,8 +1,7 @@
 # Plex Telegram Bot
 
-A comprehensive Telegram bot for managing and monitoring a Plex media server with integrated request system.
+A Claude Vibe Coded comprehensive Telegram bot for managing and monitoring a Plex media server with integrated request system.
 
-[![Buy Me A Coffee](https://img.shields.io/badge/Buy%20Me%20A%20Coffee-donate-yellow?style=flat-square&logo=buy-me-a-coffee)](https://buymeacoffee.com/Stovenovens)
 
 ## Features
 

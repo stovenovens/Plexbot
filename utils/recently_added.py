@@ -78,10 +78,7 @@ class RecentlyAddedNotifier:
         self._save_notified_items()
 
     def _is_user_request(self, title: str, year: Optional[int], media_type: str) -> bool:
-        """
-        Check if this content was added via user request.
-        If so, they already got notified - skip the general notification.
-        """
+        """Check if this content was requested via Plexbot."""
         from utils.request_tracker import request_tracker
 
         title_lower = title.lower().strip()
@@ -111,10 +108,10 @@ class RecentlyAddedNotifier:
                 # If we have years, check they match (allow 1 year difference)
                 if year and req_year:
                     if abs(int(year) - int(req_year)) <= 1:
-                        logger.debug("Skipping notification for '%s' - matches user request", title)
+                        logger.debug("'%s' matches a Plexbot request — notifying", title)
                         return True
                 else:
-                    logger.debug("Skipping notification for '%s' - matches user request", title)
+                    logger.debug("'%s' matches a Plexbot request — notifying", title)
                     return True
 
         return False
@@ -207,9 +204,8 @@ class RecentlyAddedNotifier:
             title = item.get("title", "Unknown")
             year = item.get("year")
 
-            # Skip if this was a user request (they already got notified)
-            if self._is_user_request(title, year, media_type):
-                # Mark as notified so we don't check again
+            # Only notify for content that was requested via Plexbot
+            if not self._is_user_request(title, year, media_type):
                 self._add_notified_item(key, title, media_type)
                 continue
 

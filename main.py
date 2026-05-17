@@ -89,22 +89,6 @@ async def on_startup(app):
     )
     logger.info("📬 Request tracking enabled - checking every 15 minutes")
 
-    # Add recently added notification job - check every 5 minutes
-    from utils.recently_added import recently_added_notifier
-    async def check_recently_added_job(bot):
-        """Periodic job to check for newly added content"""
-        await recently_added_notifier.check_and_notify(bot)
-
-    scheduler.add_job(
-        check_recently_added_job,
-        'interval',
-        minutes=5,
-        args=[app.bot],
-        id='check_recently_added',
-        misfire_grace_time=300,  # 5 minutes grace period
-        coalesce=True
-    )
-    logger.info("📺 Recently added notifications enabled - checking every 5 minutes")
 
     # Purge stale search sessions every 10 minutes (TTL = 30 minutes)
     from commands.request_commands import request_manager
